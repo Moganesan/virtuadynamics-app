@@ -15,6 +15,45 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { authService } from '../services/api';
 
+const ResendTimer = ({ email, setError }: { email: string, setError: (msg: string) => void }) => {
+    const [timer, setTimer] = useState(60);
+
+    useEffect(() => {
+        let interval: ReturnType<typeof setInterval>;
+        if (timer > 0) {
+            interval = setInterval(() => {
+                setTimer((prev) => prev - 1);
+            }, 1000);
+        }
+        return () => clearInterval(interval);
+    }, [timer]);
+
+    const handleResend = async () => {
+        if (timer > 0) return;
+
+        setTimer(60);
+        try {
+            await authService.requestOtp(email || '');
+            Alert.alert("Sent", "A new OTP has been sent to your email.", [
+                { text: "OK" }
+            ]);
+        } catch (err: any) {
+            setError(err.message || 'Failed to resend OTP.');
+        }
+    };
+
+    return (
+        <View style={styles.footerContainer}>
+            <Text style={styles.footerText}>Didn't receive the code? </Text>
+            <TouchableOpacity onPress={handleResend} disabled={timer > 0}>
+                <Text style={[styles.footerLink, timer > 0 && styles.footerLinkDisabled]}>
+                    {timer > 0 ? `Resend in ${timer}s` : 'Resend OTP'}
+                </Text>
+            </TouchableOpacity>
+        </View>
+    );
+};
+
 export default function VerifyOtp() {
     const router = useRouter();
     const { email } = useLocalSearchParams<{ email: string }>();
@@ -22,7 +61,6 @@ export default function VerifyOtp() {
     const [otp, setOtp] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [timer, setTimer] = useState(60);
 
     useEffect(() => {
         // Initial OTP Request when user enters screen
@@ -38,14 +76,7 @@ export default function VerifyOtp() {
         sendInitialOtp();
     }, [email]);
 
-    useEffect(() => {
-        if (timer > 0) {
-            const interval = setInterval(() => {
-                setTimer((prev) => prev - 1);
-            }, 1000);
-            return () => clearInterval(interval);
-        }
-    }, [timer]);
+
 
     const handleVerify = async () => {
         setError('');
@@ -63,6 +94,7 @@ export default function VerifyOtp() {
             });
 
             if (response.error) {
+                console.log('OTP Verification Failed', response);
                 setError(response.message || 'Verification failed.');
                 return;
             }
@@ -75,20 +107,6 @@ export default function VerifyOtp() {
             setError(err.message || 'Failed to verify OTP.');
         } finally {
             setLoading(false);
-        }
-    };
-
-    const handleResend = async () => {
-        if (timer > 0) return;
-
-        setTimer(60);
-        try {
-            await authService.requestOtp(email || '');
-            Alert.alert("Sent", "A new OTP has been sent to your email.", [
-                { text: "OK" }
-            ]);
-        } catch (err: any) {
-            setError(err.message || 'Failed to resend OTP.');
         }
     };
 
@@ -137,14 +155,7 @@ export default function VerifyOtp() {
                             <Text style={styles.buttonText}>{loading ? 'Verifying...' : 'Verify OTP'}</Text>
                         </TouchableOpacity>
 
-                        <View style={styles.footerContainer}>
-                            <Text style={styles.footerText}>Didn't receive the code? </Text>
-                            <TouchableOpacity onPress={handleResend} disabled={timer > 0}>
-                                <Text style={[styles.footerLink, timer > 0 && styles.footerLinkDisabled]}>
-                                    {timer > 0 ? `Resend in ${timer}s` : 'Resend OTP'}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
+                        <ResendTimer email={email || ''} setError={setError} />
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>

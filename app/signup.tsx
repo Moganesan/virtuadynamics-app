@@ -50,7 +50,15 @@ export default function Login() {
         username,
       });
       if (response.error) {
-        setError(response.message);
+        console.log('SignUp Failed', response);
+        if (response.message && response.message.includes('not activated')) {
+          router.replace({
+            pathname: '/verify-otp',
+            params: { email }
+          });
+          return;
+        }
+        setError(response.message || 'Signup failed.');
         return;
       }
       console.log('Signup Successful', response);

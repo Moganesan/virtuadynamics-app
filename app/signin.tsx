@@ -42,6 +42,13 @@ export default function Login() {
             });
             if (response.error) {
                 console.log('Login Failed', response);
+                if (response.message && response.message.includes('not activated')) {
+                    router.replace({
+                        pathname: '/verify-otp',
+                        params: { email }
+                    });
+                    return;
+                }
                 setError(response.message || 'Login failed.');
                 return;
             }

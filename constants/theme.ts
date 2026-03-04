@@ -5,11 +5,12 @@
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
+const tintColorLight = '#FFC300';
 const tintColorDark = '#fff';
 
 export const AppColors = {
   primary: '#FFC300',
+  secondary: '#334155',
   background: '#f8fafc',
   surface: '#ffffff',
   textPrimary: '#0f172a',
@@ -18,6 +19,11 @@ export const AppColors = {
   border: '#e2e8f0',
   placeholder: '#9ca3af',
   white: '#ffffff',
+  success: '#10b981', // Normal (Green)
+  warning: '#f59e0b', // Warning (Amber/Yellow)
+  critical: '#ef4444', // Critical/Danger (Red)
+  disabled: '#cbd5e1', // Disabled State
+  disconnected: '#94a3b8', // Disconnected (Gray)
 };
 
 export const Colors = {
