@@ -1,5 +1,6 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AppColors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import React, { useState } from 'react';
 import {
     Alert,
@@ -54,10 +55,26 @@ const ROLE_COLORS: Record<ContactRole, { color: string; bg: string }> = {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
+    const { user, logout } = useAuth();
+
+    const handleLogout = () => {
+        Alert.alert('Logout', 'Are you sure you want to logout?', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Logout',
+                style: 'destructive',
+                onPress: async () => {
+                    await logout();
+                    // AuthGate in _layout.tsx will automatically redirect to /signin
+                },
+            },
+        ]);
+    };
+
     // Profile
     const [profile, setProfile] = useState<ProfileData>({
-        name: 'John Doe',
-        email: 'johndoe@example.com',
+        name: user?.name || user?.username || 'John Doe',
+        email: user?.email || 'johndoe@example.com',
         age: '34',
         height: '175 cm',
         weight: '72 kg',
@@ -277,10 +294,7 @@ export default function SettingsScreen() {
                 <TouchableOpacity
                     style={styles.logoutButton}
                     activeOpacity={0.8}
-                    onPress={() => Alert.alert('Logout', 'Are you sure you want to logout?', [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Logout', style: 'destructive' },
-                    ])}
+                    onPress={handleLogout}
                 >
                     <IconSymbol name="arrow.right.square" size={20} color={AppColors.critical} />
                     <Text style={styles.logoutText}>Logout</Text>

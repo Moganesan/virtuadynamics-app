@@ -1,4 +1,5 @@
 import { AppColors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
@@ -13,12 +14,11 @@ import {
     View
 } from 'react-native';
 import { SafeAreaView } from "react-native-safe-area-context";
-import { authService } from '../services/api';
 
 export default function Login() {
-    const router = useRouter()
+    const router = useRouter();
+    const { login } = useAuth();
 
-    const [username, setUsername] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
@@ -28,7 +28,6 @@ export default function Login() {
     const handleLogin = async () => {
         setError('');
 
-        // Basic validation
         if (!email || !password) {
             setError('Please fill in all fields.');
             return;
@@ -36,25 +35,21 @@ export default function Login() {
 
         try {
             setLoading(true);
-            const response = await authService.signin({
-                email,
-                password,
-            });
-            if (response.error) {
-                console.log('Login Failed', response);
-                if (response.message && response.message.includes('not activated')) {
+            const result = await login(email, password);
+
+            if (result.error) {
+                if (result.message && result.message.includes('not activated')) {
                     router.replace({
                         pathname: '/verify-otp',
                         params: { email }
                     });
                     return;
                 }
-                setError(response.message || 'Login failed.');
+                setError(result.message || 'Login failed.');
                 return;
             }
-            console.log('Login Successful', response);
-            // Optional: Redirect locally to home
-            router.replace('/');
+
+            // AuthGate in _layout.tsx will automatically redirect to /(tabs)/dashboard
         } catch (err: any) {
             setError(err.message || 'Failed to sign in.');
         } finally {
@@ -241,7 +236,7 @@ const styles = StyleSheet.create({
         elevation: 0,
     },
     buttonText: {
-        color: AppColors.textPrimary, // Changed text color to ensure contrast with light yellow
+        color: AppColors.textPrimary,
         fontSize: 16,
         fontWeight: '700',
     },

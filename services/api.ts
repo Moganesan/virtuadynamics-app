@@ -78,5 +78,10 @@ export const authService = {
         return apiClient.post('/api/user/otp', {
             email: email,
         });
-    }
+    },
+    logout: async () => {
+        return apiClient.post('/api/user/logout', {
+            app_id: 'CRI4VNCFF4K6X2',
+        });
+    },
 };

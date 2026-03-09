@@ -1,11 +1,18 @@
-import { Link } from 'expo-router'
-import { Text, View } from 'react-native'
+import { useAuth } from '@/context/AuthContext';
+import { Redirect } from 'expo-router';
+import { ActivityIndicator, View } from 'react-native';
 
 export default function Index() {
-  return (
-    <View>
-      <Text style={{ color: 'red' }}>Index 2</Text>
-      <Link href="/signup"><Text>Login</Text></Link>
-    </View>
-  )
+    const { user, isLoading } = useAuth();
+
+    if (isLoading) {
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#FFC300" />
+            </View>
+        );
+    }
+
+    // Immediately redirect — no flash, no flicker
+    return <Redirect href={user ? '/(tabs)/dashboard' : '/signin'} />;
 }
