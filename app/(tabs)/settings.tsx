@@ -1,7 +1,8 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AppColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import React, { useState } from 'react';
+import { settingsService } from '@/services/api';
+import React, { useEffect, useState } from 'react';
 import {
     Alert,
     Modal,
@@ -55,7 +56,7 @@ const ROLE_COLORS: Record<ContactRole, { color: string; bg: string }> = {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
-    const { user, logout } = useAuth();
+    const { user, localToken, logout } = useAuth();
 
     const handleLogout = () => {
         Alert.alert('Logout', 'Are you sure you want to logout?', [
@@ -71,24 +72,28 @@ export default function SettingsScreen() {
         ]);
     };
 
+    // Derive display name from the API response:
+    // prefer first_name + last_name, fall back to username
+    const fullName = user?.first_name
+        ? `${user.first_name}${user.last_name ? ' ' + user.last_name : ''}`
+        : (user?.username || '');
+
+    const primaryProfile = user?.user_profiles?.[0];
+
     // Profile
     const [profile, setProfile] = useState<ProfileData>({
-        name: user?.name || user?.username || 'John Doe',
-        email: user?.email || 'johndoe@example.com',
-        age: '34',
-        height: '175 cm',
-        weight: '72 kg',
-        address: '14B, Greenfield Apartments, Chennai, TN 600001',
+        name: fullName,
+        email: user?.email || '',
+        age: primaryProfile?.date_of_birth || '',
+        height: '',
+        weight: '',
+        address: primaryProfile?.home_address || '',
     });
     const [editField, setEditField] = useState<{ key: keyof ProfileData; label: string } | null>(null);
     const [editValue, setEditValue] = useState('');
 
     // Emergency contacts
-    const [contacts, setContacts] = useState<EmergencyContact[]>([
-        { id: '1', name: 'Alice Johnson',   phone: '+91 98765 43210', role: 'Friend' },
-        { id: '2', name: 'Ravi Kumar',       phone: '+91 87654 32109', role: 'Relative' },
-        { id: '3', name: 'Dr. Priya Sharma', phone: '+91 99001 12233', role: 'Doctor' },
-    ]);
+    const [contacts, setContacts] = useState<EmergencyContact[]>([]);
     const [importModalVisible, setImportModalVisible] = useState(false);
     const [rolePickerContact, setRolePickerContact] = useState<{ id: string; name: string; phone: string } | null>(null);
 
@@ -98,10 +103,57 @@ export default function SettingsScreen() {
     const [notifDrone, setNotifDrone]             = useState(false);
     const [notifWeeklyReport, setNotifWeeklyReport] = useState(true);
 
-    // Smart ring
-    const ringConnected = true;
-    const ringName = 'VD SmartRing Pro';
-    const ringBattery = 78;
+    // Smart ring / connected device
+    const [device, setDevice] = useState({ name: 'VD SmartRing Pro', battery: 78, connected: false });
+
+    // ── Load data from local backend ─────────────────────────────────────────
+
+    useEffect(() => {
+        if (!localToken) return;
+
+        // Profile fields (age, height, weight, address)
+        settingsService.getProfile(localToken)
+            .then((res) => {
+                if (res.user?.profile) {
+                    const p = res.user.profile;
+                    setProfile((prev) => ({
+                        ...prev,
+                        age:     p.age     || '',
+                        height:  p.height  || '',
+                        weight:  p.weight  || '',
+                        address: p.address || '',
+                    }));
+                }
+            })
+            .catch(() => {});
+
+        // Emergency contacts
+        settingsService.getContacts(localToken)
+            .then((res) => { if (res.data) setContacts(res.data); })
+            .catch(() => {});
+
+        // Notification settings
+        settingsService.getNotifications(localToken)
+            .then((res) => {
+                if (res.data) {
+                    setNotifEmergency(res.data.emergencyAlerts);
+                    setNotifVitals(res.data.vitalWarnings);
+                    setNotifDrone(res.data.droneStatusUpdates);
+                    setNotifWeeklyReport(res.data.weeklyHealthReports);
+                }
+            })
+            .catch(() => {});
+
+        // Connected devices
+        settingsService.getDevices(localToken)
+            .then((res) => {
+                const connected = res.data?.find((d: any) => d.status === 'connected');
+                if (connected) {
+                    setDevice({ name: connected.name, battery: connected.battery, connected: true });
+                }
+            })
+            .catch(() => {});
+    }, [localToken]);
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -110,9 +162,13 @@ export default function SettingsScreen() {
         setEditValue(profile[key]);
     };
 
-    const saveEdit = () => {
+    const saveEdit = async () => {
         if (editField) {
             setProfile((p) => ({ ...p, [editField.key]: editValue }));
+            const localProfileFields: (keyof ProfileData)[] = ['age', 'height', 'weight', 'address'];
+            if (localProfileFields.includes(editField.key) && localToken) {
+                settingsService.updateProfile({ [editField.key]: editValue }, localToken).catch(() => {});
+            }
         }
         setEditField(null);
     };
@@ -120,7 +176,16 @@ export default function SettingsScreen() {
     const removeContact = (id: string) => {
         Alert.alert('Remove Contact', 'Remove this emergency contact?', [
             { text: 'Cancel', style: 'cancel' },
-            { text: 'Remove', style: 'destructive', onPress: () => setContacts((c) => c.filter((x) => x.id !== id)) },
+            {
+                text: 'Remove',
+                style: 'destructive',
+                onPress: () => {
+                    setContacts((c) => c.filter((x) => x.id !== id));
+                    if (localToken) {
+                        settingsService.deleteContact(id, localToken).catch(() => {});
+                    }
+                },
+            },
         ]);
     };
 
@@ -129,7 +194,7 @@ export default function SettingsScreen() {
         setRolePickerContact(contact);
     };
 
-    const confirmRole = (role: ContactRole) => {
+    const confirmRole = async (role: ContactRole) => {
         if (!rolePickerContact) return;
         const alreadyExists = contacts.some((c) => c.phone === rolePickerContact.phone);
         if (alreadyExists) {
@@ -137,16 +202,35 @@ export default function SettingsScreen() {
             setRolePickerContact(null);
             return;
         }
-        setContacts((prev) => [
-            ...prev,
-            { id: Date.now().toString(), name: rolePickerContact.name, phone: rolePickerContact.phone, role },
-        ]);
+        if (localToken) {
+            try {
+                const res = await settingsService.addContact(
+                    { name: rolePickerContact.name, phone: rolePickerContact.phone, role },
+                    localToken,
+                );
+                setContacts((prev) => [...prev, res.data]);
+            } catch (e: any) {
+                Alert.alert('Error', e.message || 'Failed to add contact');
+            }
+        } else {
+            setContacts((prev) => [
+                ...prev,
+                { id: Date.now().toString(), name: rolePickerContact.name, phone: rolePickerContact.phone, role },
+            ]);
+        }
         setRolePickerContact(null);
+    };
+
+    const handleNotifChange = (key: string, setter: (v: boolean) => void, value: boolean) => {
+        setter(value);
+        if (localToken) {
+            settingsService.updateNotificationSetting(key, value, localToken).catch(() => {});
+        }
     };
 
     const initials = profile.name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 
-    const batteryColor = ringBattery > 50 ? AppColors.success : ringBattery > 20 ? AppColors.warning : AppColors.critical;
+    const batteryColor = device.battery > 50 ? AppColors.success : device.battery > 20 ? AppColors.warning : AppColors.critical;
 
     // ── Render ───────────────────────────────────────────────────────────────
 
@@ -233,28 +317,28 @@ export default function SettingsScreen() {
                         label="Emergency Alerts"
                         sub="Immediate anomaly and SOS alerts"
                         value={notifEmergency}
-                        onChange={setNotifEmergency}
+                        onChange={(v) => handleNotifChange('emergencyAlerts', setNotifEmergency, v)}
                     />
                     <Divider />
                     <NotifRow
                         label="Vital Warnings"
                         sub="Threshold breaches for vitals"
                         value={notifVitals}
-                        onChange={setNotifVitals}
+                        onChange={(v) => handleNotifChange('vitalWarnings', setNotifVitals, v)}
                     />
                     <Divider />
                     <NotifRow
                         label="Drone Status"
                         sub="Dispatch and landing updates"
                         value={notifDrone}
-                        onChange={setNotifDrone}
+                        onChange={(v) => handleNotifChange('droneStatusUpdates', setNotifDrone, v)}
                     />
                     <Divider />
                     <NotifRow
                         label="Weekly Report"
                         sub="Health summary every Monday"
                         value={notifWeeklyReport}
-                        onChange={setNotifWeeklyReport}
+                        onChange={(v) => handleNotifChange('weeklyHealthReports', setNotifWeeklyReport, v)}
                         last
                     />
                 </View>
@@ -266,25 +350,25 @@ export default function SettingsScreen() {
                         <View style={styles.ringIconWrap}>
                             <View style={styles.ringIconOuter}>
                                 <View style={styles.ringIconInner}>
-                                    <IconSymbol name="bluetooth" size={14} color={ringConnected ? AppColors.primary : AppColors.disconnected} />
+                                    <IconSymbol name="bluetooth" size={14} color={device.connected ? AppColors.primary : AppColors.disconnected} />
                                 </View>
                             </View>
                         </View>
                         <View style={styles.ringInfo}>
-                            <Text style={styles.ringName}>{ringName}</Text>
+                            <Text style={styles.ringName}>{device.name}</Text>
                             <View style={styles.ringStatusRow}>
-                                <View style={[styles.ringDot, { backgroundColor: ringConnected ? AppColors.success : AppColors.disconnected }]} />
-                                <Text style={[styles.ringStatus, { color: ringConnected ? AppColors.success : AppColors.disconnected }]}>
-                                    {ringConnected ? 'Connected' : 'Disconnected'}
+                                <View style={[styles.ringDot, { backgroundColor: device.connected ? AppColors.success : AppColors.disconnected }]} />
+                                <Text style={[styles.ringStatus, { color: device.connected ? AppColors.success : AppColors.disconnected }]}>
+                                    {device.connected ? 'Connected' : 'Disconnected'}
                                 </Text>
                             </View>
                         </View>
-                        {ringConnected && (
+                        {device.connected && (
                             <View style={styles.ringBatteryBlock}>
                                 <View style={styles.ringBatteryTrack}>
-                                    <View style={[styles.ringBatteryFill, { width: `${ringBattery}%` as any, backgroundColor: batteryColor }]} />
+                                    <View style={[styles.ringBatteryFill, { width: `${device.battery}%` as any, backgroundColor: batteryColor }]} />
                                 </View>
-                                <Text style={[styles.ringBatteryPct, { color: batteryColor }]}>{ringBattery}%</Text>
+                                <Text style={[styles.ringBatteryPct, { color: batteryColor }]}>{device.battery}%</Text>
                             </View>
                         )}
                     </View>

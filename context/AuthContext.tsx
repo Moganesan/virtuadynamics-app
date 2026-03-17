@@ -1,17 +1,57 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { authService } from '@/services/api';
+import { authService, settingsService } from '@/services/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export interface UserProfile {
+    profile_id: number;
+    link: string;
+    profile_link: string;
+    first_name: string;
+    last_name: string;
+    phone: string;
+    nickname: string;
+    country: string;
+    phone_verified: number;
+    auth_otp: string;
+    profile_picture: string;
+    date_of_birth: string;
+    home_address: string;
+    office_address: string;
+    newsletter: string;
+    two_factor_auth: string;
+    history: string;
+    default_profile: string;
+    required_crypto_profile: number;
+    created_at: string;
+}
+
 export interface AuthUser {
+    user_id: number;
+    account_id: number;
+    seed_verifier: string;
+    first_name: string;
+    last_name: string;
+    username: string;
     email: string;
-    token?: string;
+    api_token: string;
+    is_email_verified: string;
+    is_active: string;
+    profile_picture: string;
+    country_code: string;
+    phone: string;
+    date_of_birth: string;
+    location: string;
+    first_time_login: string;
+    last_login: string;
+    user_profiles: UserProfile[];
     [key: string]: any;
 }
 
 interface AuthContextType {
     user: AuthUser | null;
+    localToken: string | null;
     isLoading: boolean;
     login: (email: string, password: string) => Promise<{ error?: boolean; message?: string }>;
     logout: () => Promise<void>;
@@ -20,6 +60,7 @@ interface AuthContextType {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const AUTH_STORAGE_KEY = 'vd_auth_session';
+const LOCAL_TOKEN_KEY = 'vd_local_token';
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -29,15 +70,18 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<AuthUser | null>(null);
+    const [localToken, setLocalToken] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
     // Restore session from storage on app startup
     useEffect(() => {
-        AsyncStorage.getItem(AUTH_STORAGE_KEY)
-            .then((stored) => {
-                if (stored) {
-                    setUser(JSON.parse(stored));
-                }
+        Promise.all([
+            AsyncStorage.getItem(AUTH_STORAGE_KEY),
+            AsyncStorage.getItem(LOCAL_TOKEN_KEY),
+        ])
+            .then(([stored, storedLocalToken]) => {
+                if (stored) setUser(JSON.parse(stored));
+                if (storedLocalToken) setLocalToken(storedLocalToken);
             })
             .catch(() => {})
             .finally(() => setIsLoading(false));
@@ -51,10 +95,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 return { error: true, message: response.message || 'Login failed.' };
             }
 
-            // Store full response (includes token, user info, etc.)
-            const session: AuthUser = { email, ...response };
+            // The external API returns: { error, statusCode, message, data: { ...user fields, api_token } }
+            // We store data directly so user.api_token, user.username etc. are all top-level
+            const session: AuthUser = response.data;
             await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
             setUser(session);
+
+            // Create/retrieve a local session on our own backend for settings/contacts/notifications
+            try {
+                const localRes = await settingsService.createSession({
+                    externalUserId: String(session.user_id),
+                    email: session.email,
+                    username: session.username,
+                });
+                if (localRes.token) {
+                    await AsyncStorage.setItem(LOCAL_TOKEN_KEY, localRes.token);
+                    setLocalToken(localRes.token);
+                }
+            } catch {
+                // Non-fatal: settings will degrade gracefully without a local token
+            }
+
             return {};
         } catch (err: any) {
             return { error: true, message: err.message || 'Failed to sign in.' };
@@ -63,16 +124,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const logout = async () => {
         try {
-            // Attempt backend logout if endpoint exists (fire-and-forget)
-            await authService.logout().catch(() => {});
+            if (user?.api_token) {
+                await authService.logout(user.api_token).catch(() => {});
+            }
         } finally {
-            await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+            await AsyncStorage.multiRemove([AUTH_STORAGE_KEY, LOCAL_TOKEN_KEY]);
             setUser(null);
+            setLocalToken(null);
         }
     };
 
     return (
-        <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+        <AuthContext.Provider value={{ user, localToken, isLoading, login, logout }}>
             {children}
         </AuthContext.Provider>
     );

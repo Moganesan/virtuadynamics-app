@@ -3,6 +3,7 @@ import { StatusBadge } from '@/components/ui/StatusBadge';
 import { VitalCard } from '@/components/ui/VitalCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AppColors } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
 import React, { useState } from 'react';
 import {
     Modal,
@@ -59,7 +60,12 @@ const STATUS_CONFIG: Record<DroneStatus, { label: string; color: string; bg: str
 };
 
 export default function DashboardScreen() {
+    const { user } = useAuth();
     const [droneModalVisible, setDroneModalVisible] = useState(false);
+
+    const displayName = user?.first_name
+        ? `${user.first_name}${user.last_name ? ' ' + user.last_name : ''}`
+        : (user?.username || 'User');
 
     return (
         <View style={styles.safeArea}>
@@ -68,7 +74,7 @@ export default function DashboardScreen() {
                 <View style={styles.header}>
                     <View>
                         <Text style={styles.greeting}>Good Morning,</Text>
-                        <Text style={styles.patientName}>John Doe</Text>
+                        <Text style={styles.patientName}>{displayName}</Text>
                     </View>
                     <StatusBadge status="stable" />
                 </View>
