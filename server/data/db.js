@@ -1,6 +1,6 @@
 // In-memory data store — replace collections with real DB calls as needed
 
-const users = [];
+const users = []; // Local users: { id, externalUserId, email, username, profile: { height, weight }, createdAt }
 const otpStore = {}; // { email: { otp, expiresAt } }
 const vitals = []; // { id, userId, heartRate, bloodOxygen, temperature, bloodPressure, trend, recordedAt }
 const drones = [

@@ -42,14 +42,10 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`VirtuaDynamics API running on http://localhost:${PORT}`);
   console.log(`\nAvailable endpoints:`);
-  console.log(`  POST   /api/auth/signup`);
-  console.log(`  POST   /api/auth/signin`);
-  console.log(`  POST   /api/auth/otp`);
-  console.log(`  POST   /api/auth/otp/verify`);
+  console.log(`  POST   /api/auth/session     (exchange VirtuaLogin user for local JWT)`);
   console.log(`  POST   /api/auth/logout`);
-  console.log(`  GET    /api/users/me`);
-  console.log(`  PUT    /api/users/me`);
-  console.log(`  PUT    /api/users/me/password`);
+  console.log(`  GET    /api/users/me          (local health data)`);
+  console.log(`  PUT    /api/users/me          (update height/weight)`);
   console.log(`  DELETE /api/users/me`);
   console.log(`  GET    /api/vitals`);
   console.log(`  GET    /api/vitals/latest`);

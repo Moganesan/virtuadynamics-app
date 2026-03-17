@@ -1,17 +1,65 @@
-import { Platform } from 'react-native';
+import * as Crypto from 'expo-crypto';
 
 const BASE_URL = 'https://virtuagrid.com';
 const APP_ID = 'CRI4VNCFF4K6X2';
 
-// Local backend — Android emulator uses 10.0.2.2 to reach the host machine
-const LOCAL_BASE_URL = Platform.OS === 'android'
-    ? 'http://10.0.2.2:3000'
-    : 'http://localhost:3000';
+const LOCAL_BASE_URL = 'http://172.20.10.3:3000';
 
-/**
- * Unauthenticated client — uses application/x-www-form-urlencoded.
- * Used for auth endpoints (signup, signin, otp).
- */
+// ─── VirtuaLogin Auth Types & Helpers ────────────────────────────────────────
+
+export interface VirtuaLoginAuth {
+    api_token: string;
+    user_id: number;
+    account_id: number;
+    seed_verifier: string;
+    auth_id?: number;
+}
+
+/** Build a VirtuaLoginAuth object from the user stored in AuthContext */
+export function getVirtuaLoginAuth(user: {
+    api_token: string;
+    user_id: number;
+    account_id: number;
+    seed_verifier: string;
+    auth_id?: number;
+}): VirtuaLoginAuth {
+    return {
+        api_token: user.api_token,
+        user_id: user.user_id,
+        account_id: user.account_id,
+        seed_verifier: user.seed_verifier,
+        auth_id: user.auth_id,
+    };
+}
+
+function generateSalt(): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let salt = '';
+    for (let i = 0; i < 16; i++) {
+        salt += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return salt;
+}
+
+async function buildAuthHeaders(auth: VirtuaLoginAuth): Promise<Record<string, string>> {
+    const salt = generateSalt();
+    const valueverifier = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.MD5,
+        salt + auth.seed_verifier,
+    );
+    return {
+        'X-Authorization': auth.api_token,
+        'salt': salt,
+        'authid': String(auth.auth_id ?? auth.user_id),
+        'mainid': String(auth.user_id),
+        'accountid': String(auth.account_id),
+        'valueverifier': valueverifier,
+        'appid': APP_ID,
+    };
+}
+
+// ─── Unauthenticated External Client ─────────────────────────────────────────
+
 export const apiClient = {
     async post(endpoint: string, data: Record<string, string>) {
         const url = `${BASE_URL}${endpoint}`;
@@ -46,10 +94,8 @@ export const apiClient = {
     }
 };
 
-/**
- * Authenticated client — attaches the user's api_token as a Bearer token.
- * Use this for all endpoints that require a logged-in session.
- */
+// ─── Authenticated External Client (Bearer token — used for logout) ──────────
+
 export const authenticatedClient = {
     async post(endpoint: string, data: Record<string, string>, token: string) {
         const url = `${BASE_URL}${endpoint}`;
@@ -109,7 +155,104 @@ export const authenticatedClient = {
     },
 };
 
-// ─── Local Server — Unauthenticated Client ────────────────────────────────────
+// ─── Authenticated External Client (VirtuaLogin security headers) ────────────
+
+export const virtuaLoginClient = {
+    /** POST with FormData body (profile create, KYC, etc.) */
+    async postForm(endpoint: string, data: Record<string, string>, auth: VirtuaLoginAuth) {
+        const url = `${BASE_URL}${endpoint}`;
+        const headers = await buildAuthHeaders(auth);
+
+        const formData = new FormData();
+        for (const key in data) {
+            if (Object.prototype.hasOwnProperty.call(data, key)) {
+                formData.append(key, data[key]);
+            }
+        }
+
+        try {
+            const response = await fetch(url, { method: 'POST', headers, body: formData });
+            const responseData = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(responseData.message || 'Request failed');
+            return responseData;
+        } catch (error) {
+            console.error('VirtuaLogin API Error:', error);
+            throw error;
+        }
+    },
+
+    /** POST with JSON body (change password, etc.) */
+    async postJson(endpoint: string, data: Record<string, any>, auth: VirtuaLoginAuth) {
+        const url = `${BASE_URL}${endpoint}`;
+        const headers = await buildAuthHeaders(auth);
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+            const responseData = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(responseData.message || 'Request failed');
+            return responseData;
+        } catch (error) {
+            console.error('VirtuaLogin API Error:', error);
+            throw error;
+        }
+    },
+
+    /** PUT with FormData body (profile update) */
+    async putForm(endpoint: string, data: Record<string, string>, auth: VirtuaLoginAuth) {
+        const url = `${BASE_URL}${endpoint}`;
+        const headers = await buildAuthHeaders(auth);
+
+        const formData = new FormData();
+        for (const key in data) {
+            if (Object.prototype.hasOwnProperty.call(data, key)) {
+                formData.append(key, data[key]);
+            }
+        }
+
+        try {
+            const response = await fetch(url, { method: 'PUT', headers, body: formData });
+            const responseData = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(responseData.message || 'Request failed');
+            return responseData;
+        } catch (error) {
+            console.error('VirtuaLogin API Error:', error);
+            throw error;
+        }
+    },
+
+    /** DELETE with urlencoded body (profile delete) */
+    async deleteForm(endpoint: string, data: Record<string, string>, auth: VirtuaLoginAuth) {
+        const url = `${BASE_URL}${endpoint}`;
+        const headers = await buildAuthHeaders(auth);
+
+        const formBody = new URLSearchParams();
+        for (const key in data) {
+            if (Object.prototype.hasOwnProperty.call(data, key)) {
+                formBody.append(key, data[key]);
+            }
+        }
+
+        try {
+            const response = await fetch(url, {
+                method: 'DELETE',
+                headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formBody.toString(),
+            });
+            const responseData = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(responseData.message || 'Request failed');
+            return responseData;
+        } catch (error) {
+            console.error('VirtuaLogin API Error:', error);
+            throw error;
+        }
+    },
+};
+
+// ─── Local Server — Unauthenticated Client ───────────────────────────────────
 
 export const localClient = {
     async post(endpoint: string, data: Record<string, any>) {
@@ -226,18 +369,81 @@ export const localAuthClient = {
     },
 };
 
-// ─── Settings Service ─────────────────────────────────────────────────────────
+// ─── External Profile Service (VirtuaLogin) ──────────────────────────────────
+
+export const externalProfileService = {
+    createProfile: (
+        data: {
+            first_name: string;
+            last_name: string;
+            phone?: string;
+            date_of_birth?: string;
+            home_address?: string;
+            nickname?: string;
+            country?: string;
+        },
+        auth: VirtuaLoginAuth,
+    ) => {
+        const params: Record<string, string> = {
+            first_name: data.first_name,
+            last_name: data.last_name,
+            default_profile: 'Yes',
+        };
+        if (data.phone) params.phone = data.phone;
+        if (data.date_of_birth) params.date_of_birth = data.date_of_birth;
+        if (data.home_address) params.home_address = data.home_address;
+        if (data.nickname) params.nickname = data.nickname;
+        if (data.country) params.country = data.country;
+        return virtuaLoginClient.postForm('/api/user/profile/create', params, auth);
+    },
+
+    updateProfile: (
+        data: {
+            profile_id: string;
+            first_name: string;
+            last_name: string;
+            phone?: string;
+            date_of_birth?: string;
+            home_address?: string;
+            nickname?: string;
+            country?: string;
+        },
+        auth: VirtuaLoginAuth,
+    ) => {
+        const params: Record<string, string> = {
+            profile_id: data.profile_id,
+            first_name: data.first_name,
+            last_name: data.last_name,
+        };
+        if (data.phone !== undefined) params.phone = data.phone;
+        if (data.date_of_birth !== undefined) params.date_of_birth = data.date_of_birth;
+        if (data.home_address !== undefined) params.home_address = data.home_address;
+        if (data.nickname !== undefined) params.nickname = data.nickname;
+        if (data.country !== undefined) params.country = data.country;
+        return virtuaLoginClient.putForm('/api/user/profile/update', params, auth);
+    },
+
+    changePassword: (
+        data: { current_password: string; new_password: string; confirm_password: string },
+        auth: VirtuaLoginAuth,
+    ) => virtuaLoginClient.postJson('/api/user/change_password', data, auth),
+
+    deleteProfile: (profileId: string, auth: VirtuaLoginAuth) =>
+        virtuaLoginClient.deleteForm('/api/user/profile/delete', { profile_id: profileId }, auth),
+};
+
+// ─── Settings Service (Local Backend — health data, contacts, notifications) ─
 
 export const settingsService = {
     // Called after external login to register/find the user on our local backend
     createSession: (data: { externalUserId: string; email: string; username?: string }) =>
         localClient.post('/api/auth/session', data),
 
-    // Profile
-    getProfile: (token: string) =>
+    // Local health data only (height, weight)
+    getHealthData: (token: string) =>
         localAuthClient.get('/api/users/me', token),
 
-    updateProfile: (data: { age?: string; height?: string; weight?: string; address?: string }, token: string) =>
+    updateHealthData: (data: { height?: string; weight?: string }, token: string) =>
         localAuthClient.put('/api/users/me', data, token),
 
     // Emergency contacts
@@ -262,7 +468,55 @@ export const settingsService = {
         localAuthClient.get('/api/devices', token),
 };
 
-// ─── Auth Service ─────────────────────────────────────────────────────────────
+// ─── Vitals Service (Local Backend) ───────────────────────────────────────────
+
+export const vitalsService = {
+    getAll: (token: string) =>
+        localAuthClient.get('/api/vitals', token),
+
+    getLatest: (token: string) =>
+        localAuthClient.get('/api/vitals/latest', token),
+
+    getById: (id: string, token: string) =>
+        localAuthClient.get(`/api/vitals/${id}`, token),
+
+    create: (data: {
+        heartRate?: number;
+        bloodOxygen?: number;
+        temperature?: number;
+        bloodPressure?: string;
+        trend?: string;
+    }, token: string) =>
+        localAuthClient.post('/api/vitals', data, token),
+};
+
+// ─── Drones Service (Local Backend) ──────────────────────────────────────────
+
+export const dronesService = {
+    getAll: (token: string) =>
+        localAuthClient.get('/api/drones', token),
+
+    getById: (id: string, token: string) =>
+        localAuthClient.get(`/api/drones/${id}`, token),
+
+    updateStatus: (id: string, status: string, token: string) =>
+        localAuthClient.patch(`/api/drones/${id}/status`, { status }, token),
+};
+
+// ─── Incidents Service (Local Backend) ───────────────────────────────────────
+
+export const incidentsService = {
+    getAll: (token: string) =>
+        localAuthClient.get('/api/incidents', token),
+
+    getById: (id: string, token: string) =>
+        localAuthClient.get(`/api/incidents/${id}`, token),
+
+    create: (data: Record<string, any>, token: string) =>
+        localAuthClient.post('/api/incidents', data, token),
+};
+
+// ─── Auth Service (VirtuaLogin — signup, signin, OTP, token, password) ───────
 
 export const authService = {
     signup: async (data: {
@@ -307,6 +561,28 @@ export const authService = {
     requestOtp: async (email: string) => {
         return apiClient.post('/api/user/otp', {
             email,
+        });
+    },
+
+    verifyToken: async (data: { token: string; user_id: string }) => {
+        return apiClient.post('/api/user/token/verify', {
+            token: data.token,
+            app_id: APP_ID,
+            user_id: data.user_id,
+        });
+    },
+
+    resetPassword: async (data: {
+        email: string;
+        auth_otp: string;
+        password: string;
+        confirm_password: string;
+    }) => {
+        return apiClient.post('/api/user/password/reset', {
+            email: data.email,
+            auth_otp: data.auth_otp,
+            password: data.password,
+            confirm_password: data.confirm_password,
         });
     },
 
