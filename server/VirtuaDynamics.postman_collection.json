@@ -1,0 +1,921 @@
+{
+  "info": {
+    "name": "VirtuaDynamics API",
+    "description": "Complete API collection for VirtuaDynamics local backend.\n\n**Setup:**\n1. Run the `Auth > Create Session` request first to get a JWT token.\n2. The token is automatically saved to the `token` collection variable.\n3. All subsequent requests use this token via the `Authorization` header.\n\n**Variables:**\n- `baseUrl` — your server URL (default: http://localhost:3000)\n- `token` — JWT token (auto-set after session creation)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "vitalId",
+      "value": ""
+    },
+    {
+      "key": "droneId",
+      "value": ""
+    },
+    {
+      "key": "incidentId",
+      "value": ""
+    },
+    {
+      "key": "contactId",
+      "value": ""
+    },
+    {
+      "key": "deviceId",
+      "value": ""
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Check if the server is running."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Create Session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.token) {",
+                  "    pm.collectionVariables.set('token', res.token);",
+                  "    console.log('Token saved to collection variable');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalUserId\": \"12345\",\n  \"email\": \"testuser@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/session",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "session"]
+            },
+            "description": "Exchange VirtuaLogin external user for a local JWT. Token is auto-saved to the `token` variable."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "auth", "logout"]
+            },
+            "description": "Logout (server-side is stateless, clears client token)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "me"]
+            },
+            "description": "Get local user profile (health data: height, weight)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Health Data",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"height\": \"175 cm\",\n  \"weight\": \"70 kg\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "me"]
+            },
+            "description": "Update height and/or weight."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete My Account",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/users/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "users", "me"]
+            },
+            "description": "Delete local user account. WARNING: This is irreversible."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Vitals",
+      "item": [
+        {
+          "name": "List Vitals",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/vitals?limit=20&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "vitals"],
+              "query": [
+                { "key": "limit", "value": "20" },
+                { "key": "offset", "value": "0" }
+              ]
+            },
+            "description": "List own vital records (paginated)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Latest Vital",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/vitals/latest",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "vitals", "latest"]
+            },
+            "description": "Get the most recent vital record."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Vital by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/vitals/{{vitalId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "vitals", "{{vitalId}}"]
+            },
+            "description": "Get a specific vital record by ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Vital",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.id) {",
+                  "    pm.collectionVariables.set('vitalId', res.data.id);",
+                  "    console.log('vitalId saved:', res.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"heartRate\": 72,\n  \"bloodOxygen\": 98,\n  \"temperature\": 36.6,\n  \"bloodPressure\": \"120/80\",\n  \"trend\": \"flat\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/vitals",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "vitals"]
+            },
+            "description": "Create a new vitals record. Required: heartRate, bloodOxygen. Optional: temperature, bloodPressure, trend (up|down|flat)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Vital",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"heartRate\": 78,\n  \"bloodOxygen\": 97,\n  \"trend\": \"up\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/vitals/{{vitalId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "vitals", "{{vitalId}}"]
+            },
+            "description": "Update an existing vital record."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Vital",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/vitals/{{vitalId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "vitals", "{{vitalId}}"]
+            },
+            "description": "Delete a vital record."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Drones",
+      "item": [
+        {
+          "name": "List Drones",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/drones",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "drones"]
+            },
+            "description": "List all drones. Optional query: ?status=standby|active|charging|offline"
+          },
+          "response": []
+        },
+        {
+          "name": "List Drones (filtered by status)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/drones?status=active",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "drones"],
+              "query": [
+                { "key": "status", "value": "active" }
+              ]
+            },
+            "description": "List drones filtered by status."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Drone by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/drones/{{droneId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "drones", "{{droneId}}"]
+            },
+            "description": "Get a specific drone by ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Drone",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.id) {",
+                  "    pm.collectionVariables.set('droneId', res.data.id);",
+                  "    console.log('droneId saved:', res.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VD-Drone Alpha\",\n  \"status\": \"standby\",\n  \"location\": \"Warehouse A\",\n  \"battery\": 100,\n  \"speed\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/drones",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "drones"]
+            },
+            "description": "Add a new drone. Required: name. Optional: status (standby|active|charging|offline), location, battery, speed."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Drone",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VD-Drone Alpha Updated\",\n  \"location\": \"Field B\",\n  \"battery\": 85,\n  \"speed\": 12\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/drones/{{droneId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "drones", "{{droneId}}"]
+            },
+            "description": "Update drone details."
+          },
+          "response": []
+        },
+        {
+          "name": "Patch Drone Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/drones/{{droneId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "drones", "{{droneId}}", "status"]
+            },
+            "description": "Quick status update. Values: standby, active, charging, offline."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Drone",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/drones/{{droneId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "drones", "{{droneId}}"]
+            },
+            "description": "Delete a drone."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Incidents",
+      "item": [
+        {
+          "name": "List Incidents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/incidents?limit=20&offset=0",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "incidents"],
+              "query": [
+                { "key": "limit", "value": "20" },
+                { "key": "offset", "value": "0" }
+              ]
+            },
+            "description": "List incidents (user-scoped + global). Optional: ?severity=critical|warning|resolved&limit=20&offset=0"
+          },
+          "response": []
+        },
+        {
+          "name": "List Incidents (filtered by severity)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/incidents?severity=critical",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "incidents"],
+              "query": [
+                { "key": "severity", "value": "critical" }
+              ]
+            },
+            "description": "List incidents filtered by severity."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Incident by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/incidents/{{incidentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "incidents", "{{incidentId}}"]
+            },
+            "description": "Get a specific incident by ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Incident",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.id) {",
+                  "    pm.collectionVariables.set('incidentId', res.data.id);",
+                  "    console.log('incidentId saved:', res.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"anomalyType\": \"Low SpO2\",\n  \"severity\": \"critical\",\n  \"date\": \"2026-03-18\",\n  \"time\": \"14:30\",\n  \"routedTo\": \"Dr. Priya Sharma\",\n  \"routedRole\": \"Doctor\",\n  \"droneId\": \"drone-001\",\n  \"location\": \"Block A, Room 12\",\n  \"hasRecording\": true,\n  \"recordingDuration\": \"2m 30s\",\n  \"notes\": \"Patient complained of dizziness before anomaly detected.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/incidents",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "incidents"]
+            },
+            "description": "Create a new incident. Required: anomalyType, severity (critical|warning|resolved). Optional: date, time, routedTo, routedRole, droneId, location, hasRecording, recordingDuration, notes."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Incident",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Updated notes: Patient stabilized after oxygen support.\",\n  \"severity\": \"resolved\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/incidents/{{incidentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "incidents", "{{incidentId}}"]
+            },
+            "description": "Update an existing incident."
+          },
+          "response": []
+        },
+        {
+          "name": "Patch Incident Severity",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"severity\": \"resolved\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/incidents/{{incidentId}}/severity",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "incidents", "{{incidentId}}", "severity"]
+            },
+            "description": "Quick severity update. Values: critical, warning, resolved."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Incident",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/incidents/{{incidentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "incidents", "{{incidentId}}"]
+            },
+            "description": "Delete an incident."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Contacts",
+      "item": [
+        {
+          "name": "List Contacts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contacts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "contacts"]
+            },
+            "description": "List own emergency contacts."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Contact by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contacts/{{contactId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "contacts", "{{contactId}}"]
+            },
+            "description": "Get a specific emergency contact by ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Contact",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.id) {",
+                  "    pm.collectionVariables.set('contactId', res.data.id);",
+                  "    console.log('contactId saved:', res.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dr. Priya Sharma\",\n  \"phone\": \"+91 99001 12233\",\n  \"role\": \"Doctor\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/contacts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "contacts"]
+            },
+            "description": "Add an emergency contact. Required: name, phone. Optional: role (Friend|Relative|Doctor, default: Friend)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Contact",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dr. Priya Sharma\",\n  \"phone\": \"+91 99001 12244\",\n  \"role\": \"Doctor\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/contacts/{{contactId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "contacts", "{{contactId}}"]
+            },
+            "description": "Update an emergency contact."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Contact",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/contacts/{{contactId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "contacts", "{{contactId}}"]
+            },
+            "description": "Delete an emergency contact."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Devices",
+      "item": [
+        {
+          "name": "List Devices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/devices",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "devices"]
+            },
+            "description": "List own paired devices (smart rings)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Device by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/devices/{{deviceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "devices", "{{deviceId}}"]
+            },
+            "description": "Get a specific device by ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Device",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data.id) {",
+                  "    pm.collectionVariables.set('deviceId', res.data.id);",
+                  "    console.log('deviceId saved:', res.data.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VD SmartRing Pro\",\n  \"battery\": 100,\n  \"signalStrength\": -45,\n  \"status\": \"connected\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/devices",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "devices"]
+            },
+            "description": "Pair/add a new device. Required: name. Optional: battery, signalStrength, status (disconnected|scanning|connected)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Device",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VD SmartRing Pro v2\",\n  \"battery\": 92,\n  \"signalStrength\": -40\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/devices/{{deviceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "devices", "{{deviceId}}"]
+            },
+            "description": "Update device info."
+          },
+          "response": []
+        },
+        {
+          "name": "Patch Device Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"connected\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/devices/{{deviceId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "devices", "{{deviceId}}", "status"]
+            },
+            "description": "Connect/disconnect device. Values: disconnected, scanning, connected."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Device",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/devices/{{deviceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "devices", "{{deviceId}}"]
+            },
+            "description": "Unpair and delete a device."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Notifications",
+      "item": [
+        {
+          "name": "Get Notification Settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "notifications"]
+            },
+            "description": "Get own notification settings."
+          },
+          "response": []
+        },
+        {
+          "name": "Update All Notification Settings",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emergencyAlerts\": true,\n  \"vitalWarnings\": true,\n  \"droneStatusUpdates\": false,\n  \"weeklyHealthReports\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "notifications"]
+            },
+            "description": "Replace all notification settings."
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Emergency Alerts",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"value\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications/emergencyAlerts",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "notifications", "emergencyAlerts"]
+            },
+            "description": "Toggle emergencyAlerts setting. Omit 'value' to flip current state."
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Vital Warnings",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"value\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications/vitalWarnings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "notifications", "vitalWarnings"]
+            },
+            "description": "Toggle vitalWarnings setting."
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Drone Status Updates",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"value\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications/droneStatusUpdates",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "notifications", "droneStatusUpdates"]
+            },
+            "description": "Toggle droneStatusUpdates setting."
+          },
+          "response": []
+        },
+        {
+          "name": "Toggle Weekly Health Reports",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"value\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/notifications/weeklyHealthReports",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "notifications", "weeklyHealthReports"]
+            },
+            "description": "Toggle weeklyHealthReports setting."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
