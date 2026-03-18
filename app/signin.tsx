@@ -35,7 +35,9 @@ export default function Login() {
 
         try {
             setLoading(true);
+            console.debug(`[DEBUG][SignIn] Attempting login for email=${email}`);
             const result = await login(email, password);
+            console.debug('[DEBUG][SignIn] Login result:', JSON.stringify(result));
 
             if (result.error) {
                 if (result.message && result.message.includes('not activated')) {
@@ -51,6 +53,7 @@ export default function Login() {
 
             // AuthGate in _layout.tsx will automatically redirect to /(tabs)/dashboard
         } catch (err: any) {
+            console.error('[DEBUG][SignIn] Login error:', err);
             setError(err.message || 'Failed to sign in.');
         } finally {
             setLoading(false);

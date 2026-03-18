@@ -3,7 +3,7 @@ import { Redirect } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
 export default function Index() {
-    const { user, isLoading } = useAuth();
+    const { user, isLoading, needsOnboarding } = useAuth();
 
     if (isLoading) {
         return (
@@ -13,6 +13,7 @@ export default function Index() {
         );
     }
 
-    // Immediately redirect — no flash, no flicker
-    return <Redirect href={user ? '/(tabs)/dashboard' : '/signin'} />;
+    if (!user) return <Redirect href="/signin" />;
+    if (needsOnboarding) return <Redirect href="/onboarding" />;
+    return <Redirect href="/(tabs)/dashboard" />;
 }

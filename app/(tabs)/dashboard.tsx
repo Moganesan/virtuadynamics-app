@@ -4,8 +4,11 @@ import { VitalCard } from '@/components/ui/VitalCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AppColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import React, { useState } from 'react';
+import { dronesService, vitalsService } from '@/services/api';
+import { getSocket } from '@/services/socket';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Modal,
     ScrollView,
     StyleSheet,
@@ -15,40 +18,22 @@ import {
     View,
 } from 'react-native';
 
-const DRONES = [
-    {
-        id: '1',
-        name: 'VD-Responder Alpha',
-        status: 'standby' as const,
-        location: 'Base Station',
-        battery: 100,
-        speed: 0,
-    },
-    {
-        id: '2',
-        name: 'VD-Responder Beta',
-        status: 'active' as const,
-        location: 'Sector 4 — En Route',
-        battery: 74,
-        speed: 68,
-    },
-    {
-        id: '3',
-        name: 'VD-Responder Gamma',
-        status: 'charging' as const,
-        location: 'Charging Bay 2',
-        battery: 38,
-        speed: 0,
-    },
-    {
-        id: '4',
-        name: 'VD-Scout Delta',
-        status: 'offline' as const,
-        location: 'Maintenance',
-        battery: 0,
-        speed: 0,
-    },
-];
+interface Drone {
+    id: string;
+    name: string;
+    status: DroneStatus;
+    location: string;
+    battery: number;
+    speed: number;
+}
+
+interface VitalData {
+    heartRate: number;
+    bloodOxygen: number;
+    temperature: number;
+    bloodPressure: string;
+    trend: string;
+}
 
 type DroneStatus = 'standby' | 'active' | 'charging' | 'offline';
 
@@ -60,12 +45,103 @@ const STATUS_CONFIG: Record<DroneStatus, { label: string; color: string; bg: str
 };
 
 export default function DashboardScreen() {
-    const { user } = useAuth();
+    const { user, localToken } = useAuth();
     const [droneModalVisible, setDroneModalVisible] = useState(false);
+    const [drones, setDrones] = useState<Drone[]>([]);
+    const [vitals, setVitals] = useState<VitalData | null>(null);
+    const [loading, setLoading] = useState(true);
 
-    const displayName = user?.first_name
-        ? `${user.first_name}${user.last_name ? ' ' + user.last_name : ''}`
+    const primaryProfile = user?.user_profiles?.[0];
+    const firstName = primaryProfile?.first_name || user?.first_name || '';
+    const displayName = firstName
+        ? `${firstName}${(primaryProfile?.last_name || user?.last_name) ? ' ' + (primaryProfile?.last_name || user?.last_name) : ''}`
         : (user?.username || 'User');
+
+    const fetchData = useCallback(async () => {
+        if (!localToken) return;
+        console.debug('[DEBUG][Dashboard] Fetching drones and vitals...');
+        try {
+            const [dronesRes, vitalsRes] = await Promise.all([
+                dronesService.getAll(localToken),
+                vitalsService.getLatest(localToken).catch(() => null),
+            ]);
+            console.debug('[DEBUG][Dashboard] Drones response:', JSON.stringify(dronesRes));
+            console.debug('[DEBUG][Dashboard] Vitals response:', JSON.stringify(vitalsRes));
+            if (dronesRes.success && dronesRes.data) {
+                setDrones(dronesRes.data);
+            }
+            if (vitalsRes?.success && vitalsRes.data) {
+                setVitals(vitalsRes.data);
+            }
+        } catch (err) {
+            console.error('[DEBUG][Dashboard] Fetch error:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, [localToken]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
+
+    // Real-time socket listeners
+    useEffect(() => {
+        const socket = getSocket();
+
+        const handleVitalsUpdate = (vital: VitalData) => {
+            console.debug('[DEBUG][Dashboard] Socket vitals update:', JSON.stringify(vital));
+            setVitals(vital);
+        };
+
+        const handleDroneUpdate = (drone: Drone) => {
+            console.debug('[DEBUG][Dashboard] Socket drone update:', JSON.stringify(drone));
+            setDrones((prev) => prev.map((d) => (d.id === drone.id ? drone : d)));
+        };
+
+        const handleDroneNew = (drone: Drone) => {
+            console.debug('[DEBUG][Dashboard] Socket new drone:', JSON.stringify(drone));
+            setDrones((prev) => [...prev, drone]);
+        };
+
+        const handleDroneDeleted = ({ id }: { id: string }) => {
+            console.debug('[DEBUG][Dashboard] Socket drone deleted:', id);
+            setDrones((prev) => prev.filter((d) => d.id !== id));
+        };
+
+        socket.on('vitals:new', handleVitalsUpdate);
+        socket.on('vitals:updated', handleVitalsUpdate);
+        socket.on('drones:updated', handleDroneUpdate);
+        socket.on('drones:statusChanged', handleDroneUpdate);
+        socket.on('drones:new', handleDroneNew);
+        socket.on('drones:deleted', handleDroneDeleted);
+
+        return () => {
+            socket.off('vitals:new', handleVitalsUpdate);
+            socket.off('vitals:updated', handleVitalsUpdate);
+            socket.off('drones:updated', handleDroneUpdate);
+            socket.off('drones:statusChanged', handleDroneUpdate);
+            socket.off('drones:new', handleDroneNew);
+            socket.off('drones:deleted', handleDroneDeleted);
+        };
+    }, []);
+
+    // Determine the primary (first active or first) drone for the card
+    const primaryDrone = drones.find((d) => d.status === 'active') || drones[0];
+
+    const getVitalStatus = (type: string, value: number): 'normal' | 'warning' | 'critical' => {
+        if (type === 'heartRate') return value > 100 || value < 50 ? 'warning' : 'normal';
+        if (type === 'bloodOxygen') return value < 92 ? 'critical' : value < 95 ? 'warning' : 'normal';
+        if (type === 'temperature') return value > 38 || value < 35.5 ? 'warning' : 'normal';
+        return 'normal';
+    };
+
+    const getBpStatus = (bp: string): 'normal' | 'warning' | 'critical' => {
+        const parts = bp.split('/');
+        if (parts.length !== 2) return 'normal';
+        const systolic = parseInt(parts[0], 10);
+        if (systolic > 140 || systolic < 90) return 'warning';
+        return 'normal';
+    };
 
     return (
         <View style={styles.safeArea}>
@@ -82,44 +158,48 @@ export default function DashboardScreen() {
                 {/* Vital Grid (2x2) */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Live Vitals</Text>
-                    <View style={styles.grid}>
-                        <View style={styles.gridRow}>
-                            <VitalCard
-                                title="Heart Rate"
-                                value={72}
-                                unit="BPM"
-                                status="normal"
-                                trend="flat"
-                                iconName="heart.fill"
-                            />
-                            <VitalCard
-                                title="Blood Oxygen"
-                                value={98}
-                                unit="%"
-                                status="normal"
-                                trend="up"
-                                iconName="lungs.fill"
-                            />
+                    {loading ? (
+                        <ActivityIndicator size="small" color={AppColors.primary} />
+                    ) : (
+                        <View style={styles.grid}>
+                            <View style={styles.gridRow}>
+                                <VitalCard
+                                    title="Heart Rate"
+                                    value={vitals?.heartRate ?? '--'}
+                                    unit="BPM"
+                                    status={vitals ? getVitalStatus('heartRate', vitals.heartRate) : 'normal'}
+                                    trend={(vitals?.trend as any) || 'flat'}
+                                    iconName="heart.fill"
+                                />
+                                <VitalCard
+                                    title="Blood Oxygen"
+                                    value={vitals?.bloodOxygen ?? '--'}
+                                    unit="%"
+                                    status={vitals ? getVitalStatus('bloodOxygen', vitals.bloodOxygen) : 'normal'}
+                                    trend="flat"
+                                    iconName="lungs.fill"
+                                />
+                            </View>
+                            <View style={styles.gridRow}>
+                                <VitalCard
+                                    title="Temperature"
+                                    value={vitals?.temperature ?? '--'}
+                                    unit="°C"
+                                    status={vitals ? getVitalStatus('temperature', vitals.temperature) : 'normal'}
+                                    trend="flat"
+                                    iconName="thermometer"
+                                />
+                                <VitalCard
+                                    title="Blood Pressure"
+                                    value={vitals?.bloodPressure ?? '--'}
+                                    unit="mmHg"
+                                    status={vitals ? getBpStatus(vitals.bloodPressure) : 'normal'}
+                                    trend="flat"
+                                    iconName="drop.fill"
+                                />
+                            </View>
                         </View>
-                        <View style={styles.gridRow}>
-                            <VitalCard
-                                title="Temperature"
-                                value={36.5}
-                                unit="°C"
-                                status="normal"
-                                trend="flat"
-                                iconName="thermometer"
-                            />
-                            <VitalCard
-                                title="Blood Pressure"
-                                value="120/80"
-                                unit="mmHg"
-                                status="warning"
-                                trend="up"
-                                iconName="drop.fill"
-                            />
-                        </View>
-                    </View>
+                    )}
                 </View>
 
                 {/* Smart Ring Section */}
@@ -132,29 +212,37 @@ export default function DashboardScreen() {
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Active Drone</Text>
                     <View style={styles.droneCard}>
-                        <View style={styles.droneHeader}>
-                            <View style={styles.droneInfo}>
-                                <View style={styles.droneIconContainer}>
-                                    <IconSymbol name="airplane" size={24} color={AppColors.primary} />
+                        {primaryDrone ? (
+                            <>
+                                <View style={styles.droneHeader}>
+                                    <View style={styles.droneInfo}>
+                                        <View style={styles.droneIconContainer}>
+                                            <IconSymbol name="airplane" size={24} color={AppColors.primary} />
+                                        </View>
+                                        <View>
+                                            <Text style={styles.droneName}>{primaryDrone.name}</Text>
+                                            <Text style={styles.droneStatusText}>
+                                                {STATUS_CONFIG[primaryDrone.status]?.label ?? primaryDrone.status} - {primaryDrone.location}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                    <View style={styles.droneBattery}>
+                                        <IconSymbol name="battery.100" size={16} color={AppColors.success} />
+                                        <Text style={styles.batteryText}>{primaryDrone.battery}%</Text>
+                                    </View>
                                 </View>
-                                <View>
-                                    <Text style={styles.droneName}>VD-Responder Alpha</Text>
-                                    <Text style={styles.droneStatusText}>Standby - Base Station</Text>
-                                </View>
-                            </View>
-                            <View style={styles.droneBattery}>
-                                <IconSymbol name="battery.100" size={16} color={AppColors.success} />
-                                <Text style={styles.batteryText}>100%</Text>
-                            </View>
-                        </View>
-                        <TouchableOpacity
-                            style={styles.manageButton}
-                            onPress={() => setDroneModalVisible(true)}
-                            activeOpacity={0.7}
-                        >
-                            <Text style={styles.manageButtonText}>Manage Devices</Text>
-                            <IconSymbol name="chevron.right" size={16} color={AppColors.primary} />
-                        </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.manageButton}
+                                    onPress={() => setDroneModalVisible(true)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={styles.manageButtonText}>Manage Devices</Text>
+                                    <IconSymbol name="chevron.right" size={16} color={AppColors.primary} />
+                                </TouchableOpacity>
+                            </>
+                        ) : (
+                            <Text style={styles.droneStatusText}>No drones available</Text>
+                        )}
                     </View>
                 </View>
 
@@ -186,7 +274,7 @@ export default function DashboardScreen() {
                     <View style={styles.modalHeader}>
                         <View>
                             <Text style={styles.modalTitle}>Active Drones</Text>
-                            <Text style={styles.modalSubtitle}>{DRONES.length} devices registered</Text>
+                            <Text style={styles.modalSubtitle}>{drones.length} devices registered</Text>
                         </View>
                         <TouchableOpacity
                             style={styles.modalCloseBtn}
@@ -199,8 +287,8 @@ export default function DashboardScreen() {
 
                     {/* Drone List */}
                     <ScrollView showsVerticalScrollIndicator={false} style={styles.droneList}>
-                        {DRONES.map((drone) => {
-                            const cfg = STATUS_CONFIG[drone.status];
+                        {drones.map((drone) => {
+                            const cfg = STATUS_CONFIG[drone.status] || STATUS_CONFIG.offline;
                             const batteryColor =
                                 drone.battery > 50 ? AppColors.success :
                                     drone.battery > 20 ? AppColors.warning :

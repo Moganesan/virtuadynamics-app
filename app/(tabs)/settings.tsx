@@ -1,11 +1,16 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AppColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import { settingsService } from '@/services/api';
+import { externalProfileService, getVirtuaLoginAuth, settingsService } from '@/services/api';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import * as Contacts from 'expo-contacts';
 import React, { useEffect, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Switch,
@@ -15,6 +20,23 @@ import {
     TouchableWithoutFeedback,
     View,
 } from 'react-native';
+
+const formatDate = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+};
+
+const parseDateString = (str: string): Date | null => {
+    if (!str) return null;
+    const parts = str.split('-');
+    if (parts.length === 3) {
+        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        if (!isNaN(d.getTime())) return d;
+    }
+    return null;
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,22 +52,25 @@ interface EmergencyContact {
 interface ProfileData {
     name: string;
     email: string;
-    age: string;
+    phone: string;
+    dateOfBirth: string;
     height: string;
     weight: string;
     address: string;
 }
 
-// ─── Mock phone contacts for import ──────────────────────────────────────────
+type ProfileKey = keyof ProfileData;
 
-const PHONE_CONTACTS = [
-    { id: 'p1', name: 'Alice Johnson', phone: '+91 98765 43210' },
-    { id: 'p2', name: 'Bob Martinez',  phone: '+91 91234 56789' },
-    { id: 'p3', name: 'Dr. Priya Sharma', phone: '+91 99001 12233' },
-    { id: 'p4', name: 'Ravi Kumar',    phone: '+91 87654 32109' },
-    { id: 'p5', name: 'Sunita Patel',  phone: '+91 70011 22334' },
-    { id: 'p6', name: 'James Wilson',  phone: '+91 80099 88776' },
-];
+// Fields managed by VirtuaLogin external API
+const EXTERNAL_FIELDS: ProfileKey[] = ['name', 'phone', 'dateOfBirth', 'address'];
+// Fields managed by local backend
+const LOCAL_FIELDS: ProfileKey[] = ['height', 'weight'];
+
+interface PhoneContact {
+    id: string;
+    name: string;
+    phone: string;
+}
 
 const ROLE_COLORS: Record<ContactRole, { color: string; bg: string }> = {
     Friend:   { color: AppColors.primary,  bg: `${AppColors.primary}15` },
@@ -56,45 +81,56 @@ const ROLE_COLORS: Record<ContactRole, { color: string; bg: string }> = {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
-    const { user, localToken, logout } = useAuth();
+    const { user, localToken, logout, updateUser } = useAuth();
 
-    const handleLogout = () => {
-        Alert.alert('Logout', 'Are you sure you want to logout?', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Logout',
-                style: 'destructive',
-                onPress: async () => {
-                    await logout();
-                    // AuthGate in _layout.tsx will automatically redirect to /signin
+    const handleLogout = async () => {
+        if (Platform.OS === 'web') {
+            if (window.confirm('Are you sure you want to logout?')) {
+                await logout();
+            }
+        } else {
+            Alert.alert('Logout', 'Are you sure you want to logout?', [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Logout',
+                    style: 'destructive',
+                    onPress: async () => {
+                        await logout();
+                    },
                 },
-            },
-        ]);
+            ]);
+        }
     };
 
-    // Derive display name from the API response:
-    // prefer first_name + last_name, fall back to username
-    const fullName = user?.first_name
-        ? `${user.first_name}${user.last_name ? ' ' + user.last_name : ''}`
+    // Derive display name from the external API response
+    const primaryProfile = user?.user_profiles?.[0];
+    const firstName = primaryProfile?.first_name || user?.first_name || '';
+    const lastName = primaryProfile?.last_name || user?.last_name || '';
+    const fullName = firstName
+        ? `${firstName}${lastName ? ' ' + lastName : ''}`
         : (user?.username || '');
 
-    const primaryProfile = user?.user_profiles?.[0];
-
-    // Profile
+    // Profile — external fields from user object, local fields loaded from backend
     const [profile, setProfile] = useState<ProfileData>({
         name: fullName,
         email: user?.email || '',
-        age: primaryProfile?.date_of_birth || '',
+        phone: primaryProfile?.phone || user?.phone || '',
+        dateOfBirth: primaryProfile?.date_of_birth || user?.date_of_birth || '',
         height: '',
         weight: '',
         address: primaryProfile?.home_address || '',
     });
-    const [editField, setEditField] = useState<{ key: keyof ProfileData; label: string } | null>(null);
+    const [editField, setEditField] = useState<{ key: ProfileKey; label: string } | null>(null);
     const [editValue, setEditValue] = useState('');
+    const [editDateValue, setEditDateValue] = useState<Date>(new Date(2000, 0, 1));
+    const [showEditDatePicker, setShowEditDatePicker] = useState(false);
 
     // Emergency contacts
     const [contacts, setContacts] = useState<EmergencyContact[]>([]);
     const [importModalVisible, setImportModalVisible] = useState(false);
+    const [phoneContacts, setPhoneContacts] = useState<PhoneContact[]>([]);
+    const [contactsLoading, setContactsLoading] = useState(false);
+    const [contactSearch, setContactSearch] = useState('');
     const [rolePickerContact, setRolePickerContact] = useState<{ id: string; name: string; phone: string } | null>(null);
 
     // Notifications
@@ -106,35 +142,56 @@ export default function SettingsScreen() {
     // Smart ring / connected device
     const [device, setDevice] = useState({ name: 'VD SmartRing Pro', battery: 78, connected: false });
 
-    // ── Load data from local backend ─────────────────────────────────────────
+    // ── Sync external profile data when user changes ────────────────────────
+    useEffect(() => {
+        if (!user) return;
+        const pp = user.user_profiles?.[0];
+        const fn = pp?.first_name || user.first_name || '';
+        const ln = pp?.last_name || user.last_name || '';
+        setProfile((prev) => ({
+            ...prev,
+            name: fn ? `${fn}${ln ? ' ' + ln : ''}` : (user.username || ''),
+            email: user.email || '',
+            phone: pp?.phone || user.phone || '',
+            dateOfBirth: pp?.date_of_birth || user.date_of_birth || '',
+            address: pp?.home_address || '',
+        }));
+    }, [user]);
 
+    // ── Load local health data + contacts/notifications/devices ─────────────
     useEffect(() => {
         if (!localToken) return;
 
-        // Profile fields (age, height, weight, address)
-        settingsService.getProfile(localToken)
+        // Health data (height, weight) from local backend
+        console.debug('[DEBUG][Settings] Fetching health data...');
+        settingsService.getHealthData(localToken)
             .then((res) => {
+                console.debug('[DEBUG][Settings] Health data response:', JSON.stringify(res));
                 if (res.user?.profile) {
                     const p = res.user.profile;
                     setProfile((prev) => ({
                         ...prev,
-                        age:     p.age     || '',
                         height:  p.height  || '',
                         weight:  p.weight  || '',
-                        address: p.address || '',
                     }));
                 }
             })
-            .catch(() => {});
+            .catch((err) => { console.error('[DEBUG][Settings] Health data fetch error:', err); });
 
         // Emergency contacts
+        console.debug('[DEBUG][Settings] Fetching contacts...');
         settingsService.getContacts(localToken)
-            .then((res) => { if (res.data) setContacts(res.data); })
-            .catch(() => {});
+            .then((res) => {
+                console.debug('[DEBUG][Settings] Contacts response:', JSON.stringify(res));
+                if (res.data) setContacts(res.data);
+            })
+            .catch((err) => { console.error('[DEBUG][Settings] Contacts fetch error:', err); });
 
         // Notification settings
+        console.debug('[DEBUG][Settings] Fetching notifications...');
         settingsService.getNotifications(localToken)
             .then((res) => {
+                console.debug('[DEBUG][Settings] Notifications response:', JSON.stringify(res));
                 if (res.data) {
                     setNotifEmergency(res.data.emergencyAlerts);
                     setNotifVitals(res.data.vitalWarnings);
@@ -142,54 +199,201 @@ export default function SettingsScreen() {
                     setNotifWeeklyReport(res.data.weeklyHealthReports);
                 }
             })
-            .catch(() => {});
+            .catch((err) => { console.error('[DEBUG][Settings] Notifications fetch error:', err); });
 
         // Connected devices
+        console.debug('[DEBUG][Settings] Fetching devices...');
         settingsService.getDevices(localToken)
             .then((res) => {
+                console.debug('[DEBUG][Settings] Devices response:', JSON.stringify(res));
                 const connected = res.data?.find((d: any) => d.status === 'connected');
                 if (connected) {
                     setDevice({ name: connected.name, battery: connected.battery, connected: true });
                 }
             })
-            .catch(() => {});
+            .catch((err) => { console.error('[DEBUG][Settings] Devices fetch error:', err); });
     }, [localToken]);
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
-    const openEdit = (key: keyof ProfileData, label: string) => {
+    const openEdit = (key: ProfileKey, label: string) => {
+        if (key === 'email') return; // email is read-only (managed by external service)
         setEditField({ key, label });
         setEditValue(profile[key]);
+        if (key === 'dateOfBirth') {
+            const parsed = parseDateString(profile[key]);
+            setEditDateValue(parsed || new Date(2000, 0, 1));
+            setShowEditDatePicker(Platform.OS === 'ios');
+        }
     };
 
     const saveEdit = async () => {
-        if (editField) {
-            setProfile((p) => ({ ...p, [editField.key]: editValue }));
-            const localProfileFields: (keyof ProfileData)[] = ['age', 'height', 'weight', 'address'];
-            if (localProfileFields.includes(editField.key) && localToken) {
-                settingsService.updateProfile({ [editField.key]: editValue }, localToken).catch(() => {});
+        if (!editField) return;
+        const key = editField.key;
+        const value = editValue;
+
+        // Optimistic UI update
+        setProfile((p) => ({ ...p, [key]: value }));
+
+        if (LOCAL_FIELDS.includes(key) && localToken) {
+            // Save height/weight to local backend
+            console.debug(`[DEBUG][Settings] Updating health data: ${key}=${value}`);
+            settingsService.updateHealthData({ [key]: value }, localToken).catch((err) => {
+                console.error('[DEBUG][Settings] Health data update error:', err);
+            });
+        } else if (EXTERNAL_FIELDS.includes(key) && user) {
+            // Save to VirtuaLogin external API
+            const auth = getVirtuaLoginAuth(user);
+            const pp = user.user_profiles?.[0];
+
+            // Current name parts (may be overridden if editing 'name')
+            let fn = pp?.first_name || user.first_name || '';
+            let ln = pp?.last_name || user.last_name || '';
+
+            if (key === 'name') {
+                const parts = value.trim().split(/\s+/);
+                fn = parts[0] || '';
+                ln = parts.slice(1).join(' ') || '';
+            }
+
+            try {
+                if (!pp?.profile_id) {
+                    // No profile exists — create one via VirtuaLogin
+                    const createData: {
+                        first_name: string;
+                        last_name: string;
+                        phone?: string;
+                        date_of_birth?: string;
+                        home_address?: string;
+                    } = { first_name: fn, last_name: ln };
+                    if (key === 'phone') createData.phone = value;
+                    else if (profile.phone) createData.phone = profile.phone;
+                    if (key === 'dateOfBirth') createData.date_of_birth = value;
+                    else if (profile.dateOfBirth) createData.date_of_birth = profile.dateOfBirth;
+                    if (key === 'address') createData.home_address = value;
+                    else if (profile.address) createData.home_address = profile.address;
+
+                    console.debug('[DEBUG][Settings] Creating external profile:', JSON.stringify(createData));
+                    const createRes = await externalProfileService.createProfile(createData, auth);
+                    console.debug('[DEBUG][Settings] Create profile response:', JSON.stringify(createRes));
+                    if (createRes.error) throw new Error(createRes.message || 'Failed to create profile');
+
+                    const newProfile = createRes.data?.user_profiles?.[0] || createRes.data;
+                    const userUpdates: Record<string, any> = { first_name: fn, last_name: ln };
+                    userUpdates.user_profiles = [newProfile || { first_name: fn, last_name: ln }];
+                    await updateUser(userUpdates);
+                } else {
+                    // Profile exists — update it
+                    const updateData: {
+                        profile_id: string;
+                        first_name: string;
+                        last_name: string;
+                        phone?: string;
+                        date_of_birth?: string;
+                        home_address?: string;
+                    } = {
+                        profile_id: String(pp.profile_id),
+                        first_name: fn,
+                        last_name: ln,
+                    };
+                    if (key === 'phone') updateData.phone = value;
+                    if (key === 'dateOfBirth') updateData.date_of_birth = value;
+                    if (key === 'address') updateData.home_address = value;
+
+                    console.debug('[DEBUG][Settings] Updating external profile:', JSON.stringify(updateData));
+                    const updateRes = await externalProfileService.updateProfile(updateData, auth);
+                    console.debug('[DEBUG][Settings] Update profile response:', JSON.stringify(updateRes));
+                    if (updateRes.error) throw new Error(updateRes.message || 'Failed to update profile');
+
+                    // Sync changes back to local AuthContext user state
+                    const userUpdates: Record<string, any> = {};
+                    if (key === 'name') {
+                        userUpdates.first_name = fn;
+                        userUpdates.last_name = ln;
+                    }
+                    const updatedProfile = { ...pp };
+                    if (key === 'name') {
+                        updatedProfile.first_name = fn;
+                        updatedProfile.last_name = ln;
+                    }
+                    if (key === 'phone') updatedProfile.phone = value;
+                    if (key === 'dateOfBirth') updatedProfile.date_of_birth = value;
+                    if (key === 'address') updatedProfile.home_address = value;
+                    userUpdates.user_profiles = [updatedProfile, ...(user.user_profiles?.slice(1) || [])];
+                    await updateUser(userUpdates);
+                }
+            } catch (e: any) {
+                // Revert optimistic update on error
+                console.error('[DEBUG][Settings] Profile update error:', e);
+                setProfile((p) => ({ ...p, [key]: profile[key] }));
+                Alert.alert('Error', e.message || 'Failed to update profile');
             }
         }
+
         setEditField(null);
     };
 
     const removeContact = (id: string) => {
-        Alert.alert('Remove Contact', 'Remove this emergency contact?', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Remove',
-                style: 'destructive',
-                onPress: () => {
-                    setContacts((c) => c.filter((x) => x.id !== id));
-                    if (localToken) {
-                        settingsService.deleteContact(id, localToken).catch(() => {});
-                    }
-                },
-            },
-        ]);
+        const doRemove = () => {
+            setContacts((c) => c.filter((x) => x.id !== id));
+            if (localToken) {
+                console.debug(`[DEBUG][Settings] Deleting contact id=${id}`);
+                settingsService.deleteContact(id, localToken).catch((err) => {
+                    console.error('[DEBUG][Settings] Delete contact error:', err);
+                });
+            }
+        };
+
+        if (Platform.OS === 'web') {
+            if (window.confirm('Remove this emergency contact?')) {
+                doRemove();
+            }
+        } else {
+            Alert.alert('Remove Contact', 'Remove this emergency contact?', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Remove', style: 'destructive', onPress: doRemove },
+            ]);
+        }
     };
 
-    const importContact = (contact: { id: string; name: string; phone: string }) => {
+    const loadDeviceContacts = async () => {
+        setContactsLoading(true);
+        setContactSearch('');
+        try {
+            const { status } = await Contacts.requestPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission Denied', 'Access to contacts was denied. Please enable it in your device settings.');
+                setImportModalVisible(false);
+                setContactsLoading(false);
+                return;
+            }
+            const { data } = await Contacts.getContactsAsync({
+                fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Name],
+                sort: Contacts.SortTypes.FirstName,
+            });
+            const mapped: PhoneContact[] = [];
+            for (const c of data) {
+                const name = c.name || `${c.firstName || ''} ${c.lastName || ''}`.trim();
+                const phone = c.phoneNumbers?.[0]?.number;
+                if (name && phone) {
+                    mapped.push({ id: c.id ?? String(mapped.length), name, phone });
+                }
+            }
+            setPhoneContacts(mapped);
+        } catch (e: any) {
+            console.error('[DEBUG][Settings] Load contacts error:', e);
+            Alert.alert('Error', 'Failed to load contacts from your device.');
+        } finally {
+            setContactsLoading(false);
+        }
+    };
+
+    const openImportModal = () => {
+        setImportModalVisible(true);
+        loadDeviceContacts();
+    };
+
+    const importContact = (contact: PhoneContact) => {
         setImportModalVisible(false);
         setRolePickerContact(contact);
     };
@@ -204,12 +408,15 @@ export default function SettingsScreen() {
         }
         if (localToken) {
             try {
+                console.debug(`[DEBUG][Settings] Adding contact: ${rolePickerContact.name}, role=${role}`);
                 const res = await settingsService.addContact(
                     { name: rolePickerContact.name, phone: rolePickerContact.phone, role },
                     localToken,
                 );
+                console.debug('[DEBUG][Settings] Add contact response:', JSON.stringify(res));
                 setContacts((prev) => [...prev, res.data]);
             } catch (e: any) {
+                console.error('[DEBUG][Settings] Add contact error:', e);
                 Alert.alert('Error', e.message || 'Failed to add contact');
             }
         } else {
@@ -222,9 +429,12 @@ export default function SettingsScreen() {
     };
 
     const handleNotifChange = (key: string, setter: (v: boolean) => void, value: boolean) => {
+        console.debug(`[DEBUG][Settings] Updating notification: ${key}=${value}`);
         setter(value);
         if (localToken) {
-            settingsService.updateNotificationSetting(key, value, localToken).catch(() => {});
+            settingsService.updateNotificationSetting(key, value, localToken).catch((err) => {
+                console.error(`[DEBUG][Settings] Notification update error (${key}):`, err);
+            });
         }
     };
 
@@ -257,15 +467,19 @@ export default function SettingsScreen() {
                 {/* ── Personal Information ───────────────────────────────── */}
                 <SectionHeader title="Personal Information" icon="person.fill" />
                 <View style={styles.card}>
-                    <InfoRow icon="envelope.fill"   label="Email"   value={profile.email}   onEdit={() => openEdit('email',   'Email')} />
+                    <InfoRow icon="envelope.fill"       label="Email"          value={profile.email}       onEdit={() => openEdit('email', 'Email')} readOnly />
                     <Divider />
-                    <InfoRow icon="person.fill"     label="Age"     value={profile.age}     onEdit={() => openEdit('age',     'Age')} />
+                    <InfoRow icon="person.fill"          label="Name"           value={profile.name}        onEdit={() => openEdit('name', 'Name')} />
                     <Divider />
-                    <InfoRow icon="ruler"           label="Height"  value={profile.height}  onEdit={() => openEdit('height',  'Height')} />
+                    <InfoRow icon="phone.fill"           label="Phone"          value={profile.phone}       onEdit={() => openEdit('phone', 'Phone')} />
                     <Divider />
-                    <InfoRow icon="scalemass.fill"  label="Weight"  value={profile.weight}  onEdit={() => openEdit('weight',  'Weight')} />
+                    <InfoRow icon="calendar"             label="Date of Birth"  value={profile.dateOfBirth} onEdit={() => openEdit('dateOfBirth', 'Date of Birth')} />
                     <Divider />
-                    <InfoRow icon="mappin.fill"     label="Address" value={profile.address} onEdit={() => openEdit('address', 'Address')} last />
+                    <InfoRow icon="ruler"                label="Height"         value={profile.height}      onEdit={() => openEdit('height', 'Height')} />
+                    <Divider />
+                    <InfoRow icon="scalemass.fill"       label="Weight"         value={profile.weight}      onEdit={() => openEdit('weight', 'Weight')} />
+                    <Divider />
+                    <InfoRow icon="mappin.fill"          label="Address"        value={profile.address}     onEdit={() => openEdit('address', 'Address')} last />
                 </View>
 
                 {/* ── Emergency Contacts ────────────────────────────────── */}
@@ -301,7 +515,7 @@ export default function SettingsScreen() {
 
                     {contacts.length > 0 && <Divider />}
 
-                    <TouchableOpacity style={styles.importButton} onPress={() => setImportModalVisible(true)} activeOpacity={0.7}>
+                    <TouchableOpacity style={styles.importButton} onPress={openImportModal} activeOpacity={0.7}>
                         <View style={styles.importIconWrap}>
                             <IconSymbol name="plus.circle.fill" size={18} color={AppColors.primary} />
                         </View>
@@ -395,13 +609,85 @@ export default function SettingsScreen() {
                 </TouchableWithoutFeedback>
                 <View style={styles.editModal}>
                     <Text style={styles.editModalTitle}>Edit {editField?.label}</Text>
-                    <TextInput
-                        style={styles.editInput}
-                        value={editValue}
-                        onChangeText={setEditValue}
-                        autoFocus
-                        placeholderTextColor={AppColors.placeholder}
-                    />
+                    {editField?.key === 'dateOfBirth' ? (
+                        Platform.OS === 'web' ? (
+                            <input
+                                type="date"
+                                value={editValue}
+                                max={formatDate(new Date())}
+                                onChange={(e) => {
+                                    const val = (e.target as HTMLInputElement).value;
+                                    setEditValue(val);
+                                    if (val) {
+                                        const parts = val.split('-');
+                                        setEditDateValue(new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+                                    }
+                                }}
+                                style={{
+                                    borderWidth: 1.5,
+                                    borderStyle: 'solid',
+                                    borderColor: AppColors.border,
+                                    borderRadius: 12,
+                                    paddingLeft: 14,
+                                    paddingRight: 14,
+                                    paddingTop: 12,
+                                    paddingBottom: 12,
+                                    fontSize: 15,
+                                    color: AppColors.textPrimary,
+                                    backgroundColor: AppColors.background,
+                                    marginBottom: 20,
+                                    outline: 'none',
+                                    fontFamily: 'inherit',
+                                    width: '100%',
+                                    boxSizing: 'border-box' as const,
+                                }}
+                            />
+                        ) : (
+                            <>
+                                <TouchableOpacity
+                                    style={styles.editInput}
+                                    onPress={() => setShowEditDatePicker(true)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={{ fontSize: 15, color: editValue ? AppColors.textPrimary : AppColors.placeholder }}>
+                                        {editValue || 'Select date of birth'}
+                                    </Text>
+                                </TouchableOpacity>
+                                {showEditDatePicker && (
+                                    <DateTimePicker
+                                        value={editDateValue}
+                                        mode="date"
+                                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                                        maximumDate={new Date()}
+                                        onChange={(event: DateTimePickerEvent, selectedDate?: Date) => {
+                                            if (Platform.OS === 'android') setShowEditDatePicker(false);
+                                            if (event.type === 'set' && selectedDate) {
+                                                setEditDateValue(selectedDate);
+                                                setEditValue(formatDate(selectedDate));
+                                            }
+                                        }}
+                                    />
+                                )}
+                                {showEditDatePicker && Platform.OS === 'ios' && (
+                                    <TouchableOpacity
+                                        style={{ alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 16 }}
+                                        onPress={() => setShowEditDatePicker(false)}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Text style={{ fontSize: 15, fontWeight: '600', color: AppColors.primary }}>Done</Text>
+                                    </TouchableOpacity>
+                                )}
+                            </>
+                        )
+                    ) : (
+                        <TextInput
+                            style={styles.editInput}
+                            value={editValue}
+                            onChangeText={setEditValue}
+                            autoFocus
+                            placeholderTextColor={AppColors.placeholder}
+                        />
+                    )}
                     <View style={styles.editActions}>
                         <TouchableOpacity style={styles.editCancelBtn} onPress={() => setEditField(null)} activeOpacity={0.7}>
                             <Text style={styles.editCancelText}>Cancel</Text>
@@ -427,25 +713,52 @@ export default function SettingsScreen() {
                         </TouchableOpacity>
                     </View>
                     <Text style={styles.sheetSub}>Choose a contact to add as emergency contact</Text>
-                    <ScrollView showsVerticalScrollIndicator={false}>
-                        {PHONE_CONTACTS.map((c, idx) => (
-                            <React.Fragment key={c.id}>
-                                <TouchableOpacity style={styles.phoneContactRow} onPress={() => importContact(c)} activeOpacity={0.7}>
-                                    <View style={styles.phoneAvatar}>
-                                        <Text style={styles.phoneAvatarText}>
-                                            {c.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}
-                                        </Text>
-                                    </View>
-                                    <View style={styles.phoneContactInfo}>
-                                        <Text style={styles.phoneContactName}>{c.name}</Text>
-                                        <Text style={styles.phoneContactNumber}>{c.phone}</Text>
-                                    </View>
-                                    <IconSymbol name="plus.circle.fill" size={22} color={AppColors.primary} />
-                                </TouchableOpacity>
-                                {idx < PHONE_CONTACTS.length - 1 && <Divider />}
-                            </React.Fragment>
-                        ))}
-                    </ScrollView>
+                    {!contactsLoading && phoneContacts.length > 0 && (
+                        <TextInput
+                            style={styles.contactSearchInput}
+                            placeholder="Search contacts..."
+                            placeholderTextColor={AppColors.placeholder}
+                            value={contactSearch}
+                            onChangeText={setContactSearch}
+                            autoCorrect={false}
+                        />
+                    )}
+                    {contactsLoading ? (
+                        <View style={styles.contactsLoadingWrap}>
+                            <ActivityIndicator size="large" color={AppColors.primary} />
+                            <Text style={styles.contactsLoadingText}>Loading contacts...</Text>
+                        </View>
+                    ) : phoneContacts.length === 0 ? (
+                        <View style={styles.contactsLoadingWrap}>
+                            <Text style={styles.contactsLoadingText}>No contacts found on this device.</Text>
+                        </View>
+                    ) : (
+                        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                            {phoneContacts
+                                .filter((c) => {
+                                    if (!contactSearch.trim()) return true;
+                                    const q = contactSearch.toLowerCase();
+                                    return c.name.toLowerCase().includes(q) || c.phone.includes(q);
+                                })
+                                .map((c, idx, arr) => (
+                                    <React.Fragment key={c.id}>
+                                        <TouchableOpacity style={styles.phoneContactRow} onPress={() => importContact(c)} activeOpacity={0.7}>
+                                            <View style={styles.phoneAvatar}>
+                                                <Text style={styles.phoneAvatarText}>
+                                                    {c.name.split(' ').map((w) => w[0]).join('').slice(0, 2)}
+                                                </Text>
+                                            </View>
+                                            <View style={styles.phoneContactInfo}>
+                                                <Text style={styles.phoneContactName}>{c.name}</Text>
+                                                <Text style={styles.phoneContactNumber}>{c.phone}</Text>
+                                            </View>
+                                            <IconSymbol name="plus.circle.fill" size={22} color={AppColors.primary} />
+                                        </TouchableOpacity>
+                                        {idx < arr.length - 1 && <Divider />}
+                                    </React.Fragment>
+                                ))}
+                        </ScrollView>
+                    )}
                 </View>
             </Modal>
 
@@ -490,19 +803,28 @@ const SectionHeader = ({ title, icon }: { title: string; icon: string }) => (
 const Divider = () => <View style={{ height: 1, backgroundColor: AppColors.border }} />;
 
 const InfoRow = ({
-    icon, label, value, onEdit, last,
+    icon, label, value, onEdit, last, readOnly,
 }: {
-    icon: string; label: string; value: string; onEdit: () => void; last?: boolean;
+    icon: string; label: string; value: string; onEdit: () => void; last?: boolean; readOnly?: boolean;
 }) => (
-    <TouchableOpacity style={[infoStyles.row, last && { paddingBottom: 0 }]} onPress={onEdit} activeOpacity={0.7}>
+    <TouchableOpacity
+        style={[infoStyles.row, last && { paddingBottom: 0 }]}
+        onPress={readOnly ? undefined : onEdit}
+        activeOpacity={readOnly ? 1 : 0.7}
+        disabled={readOnly}
+    >
         <View style={infoStyles.iconWrap}>
             <IconSymbol name={icon as any} size={16} color={AppColors.primary} />
         </View>
         <View style={infoStyles.content}>
             <Text style={infoStyles.label}>{label}</Text>
-            <Text style={infoStyles.value} numberOfLines={1}>{value}</Text>
+            <Text style={infoStyles.value} numberOfLines={1}>{value || '—'}</Text>
         </View>
-        <IconSymbol name="pencil" size={15} color={AppColors.disconnected} />
+        {readOnly ? (
+            <IconSymbol name="lock.fill" size={13} color={AppColors.disconnected} />
+        ) : (
+            <IconSymbol name="pencil" size={15} color={AppColors.disconnected} />
+        )}
     </TouchableOpacity>
 );
 
@@ -890,6 +1212,27 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: AppColors.textSecondary,
         marginBottom: 16,
+    },
+    contactSearchInput: {
+        borderWidth: 1,
+        borderColor: AppColors.border,
+        borderRadius: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        fontSize: 15,
+        color: AppColors.textPrimary,
+        backgroundColor: AppColors.background,
+        marginBottom: 12,
+    },
+    contactsLoadingWrap: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 40,
+        gap: 12,
+    },
+    contactsLoadingText: {
+        fontSize: 14,
+        color: AppColors.textSecondary,
     },
     phoneContactRow: {
         flexDirection: 'row',

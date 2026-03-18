@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { authService, settingsService } from '@/services/api';
+import { connectSocket, disconnectSocket } from '@/services/socket';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ export interface UserProfile {
 export interface AuthUser {
     user_id: number;
     account_id: number;
+    auth_id?: number;
     seed_verifier: string;
     first_name: string;
     last_name: string;
@@ -53,8 +55,10 @@ interface AuthContextType {
     user: AuthUser | null;
     localToken: string | null;
     isLoading: boolean;
+    needsOnboarding: boolean;
     login: (email: string, password: string) => Promise<{ error?: boolean; message?: string }>;
     logout: () => Promise<void>;
+    updateUser: (updates: Partial<AuthUser>) => Promise<void>;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -80,7 +84,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             AsyncStorage.getItem(LOCAL_TOKEN_KEY),
         ])
             .then(([stored, storedLocalToken]) => {
-                if (stored) setUser(JSON.parse(stored));
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    setUser(parsed);
+                    connectSocket(String(parsed.user_id));
+                }
                 if (storedLocalToken) setLocalToken(storedLocalToken);
             })
             .catch(() => {})
@@ -89,7 +97,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const login = async (email: string, password: string): Promise<{ error?: boolean; message?: string }> => {
         try {
+            console.debug(`[DEBUG][AuthContext] Calling authService.signin for email=${email}`);
             const response = await authService.signin({ email, password });
+            console.debug('[DEBUG][AuthContext] Signin response:', JSON.stringify(response));
 
             if (response.error) {
                 return { error: true, message: response.message || 'Login failed.' };
@@ -101,41 +111,68 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
             setUser(session);
 
-            // Create/retrieve a local session on our own backend for settings/contacts/notifications
+            // Connect socket for real-time updates
+            console.debug(`[DEBUG][AuthContext] Connecting socket for user_id=${session.user_id}`);
+            connectSocket(String(session.user_id));
+
+            // Create/retrieve a local session on our own backend for health data/contacts/notifications
             try {
+                console.debug('[DEBUG][AuthContext] Creating local session...');
                 const localRes = await settingsService.createSession({
                     externalUserId: String(session.user_id),
                     email: session.email,
-                    username: session.username,
                 });
+                console.debug('[DEBUG][AuthContext] Local session response:', JSON.stringify(localRes));
                 if (localRes.token) {
                     await AsyncStorage.setItem(LOCAL_TOKEN_KEY, localRes.token);
                     setLocalToken(localRes.token);
                 }
-            } catch {
-                // Non-fatal: settings will degrade gracefully without a local token
+            } catch (localErr) {
+                console.error('[DEBUG][AuthContext] Local session creation failed:', localErr);
+                // Non-fatal: local features will degrade gracefully without a local token
             }
 
             return {};
         } catch (err: any) {
+            console.error('[DEBUG][AuthContext] Login error:', err);
             return { error: true, message: err.message || 'Failed to sign in.' };
         }
     };
 
     const logout = async () => {
-        try {
-            if (user?.api_token) {
-                await authService.logout(user.api_token).catch(() => {});
-            }
-        } finally {
-            await AsyncStorage.multiRemove([AUTH_STORAGE_KEY, LOCAL_TOKEN_KEY]);
-            setUser(null);
-            setLocalToken(null);
+        console.debug('[DEBUG][AuthContext] Logging out — clearing local state first');
+        // Clear local state immediately so the UI redirects to signin right away
+        const apiToken = user?.api_token;
+        disconnectSocket();
+        setUser(null);
+        setLocalToken(null);
+        await AsyncStorage.multiRemove([AUTH_STORAGE_KEY, LOCAL_TOKEN_KEY]);
+
+        // Fire-and-forget: notify VirtuaLogin (don't block logout on this)
+        if (apiToken) {
+            authService.logout(apiToken).catch((err) => {
+                console.error('[DEBUG][AuthContext] VirtuaLogin logout error (non-blocking):', err);
+            });
         }
     };
 
+    /** Update the locally-cached user object (e.g. after an external profile update) */
+    const updateUser = async (updates: Partial<AuthUser>) => {
+        if (!user) return;
+        const updated = { ...user, ...updates };
+        await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
+        setUser(updated);
+    };
+
+    // TODO: Re-enable profile check after backend testing is complete
+    // Check if the user has a profile with at least a first_name filled in.
+    // VirtuaLogin may auto-create an empty profile during signup, so we check the actual content.
+    // const primaryProfile = user?.user_profiles?.[0];
+    // const needsOnboarding = !!user && (!primaryProfile || !primaryProfile.first_name?.trim());
+    const needsOnboarding = false;
+
     return (
-        <AuthContext.Provider value={{ user, localToken, isLoading, login, logout }}>
+        <AuthContext.Provider value={{ user, localToken, isLoading, needsOnboarding, login, logout, updateUser }}>
             {children}
         </AuthContext.Provider>
     );

@@ -33,11 +33,14 @@ const ResendTimer = ({ email, setError }: { email: string, setError: (msg: strin
 
         setTimer(60);
         try {
+            console.debug(`[DEBUG][VerifyOTP] Resending OTP to email=${email}`);
             await authService.requestOtp(email || '');
+            console.debug('[DEBUG][VerifyOTP] OTP resent successfully');
             Alert.alert("Sent", "A new OTP has been sent to your email.", [
                 { text: "OK" }
             ]);
         } catch (err: any) {
+            console.error('[DEBUG][VerifyOTP] Resend OTP error:', err);
             setError(err.message || 'Failed to resend OTP.');
         }
     };
@@ -67,9 +70,11 @@ export default function VerifyOtp() {
         const sendInitialOtp = async () => {
             if (email) {
                 try {
+                    console.debug(`[DEBUG][VerifyOTP] Sending initial OTP to email=${email}`);
                     await authService.requestOtp(email);
+                    console.debug('[DEBUG][VerifyOTP] Initial OTP sent successfully');
                 } catch (err) {
-                    console.error("Failed to send initial OTP", err);
+                    console.error("[DEBUG][VerifyOTP] Failed to send initial OTP:", err);
                 }
             }
         };
@@ -88,22 +93,25 @@ export default function VerifyOtp() {
 
         try {
             setLoading(true);
+            console.debug(`[DEBUG][VerifyOTP] Verifying OTP for email=${email}`);
             const response = await authService.verifyOtp({
                 email: email || '',
                 auth_otp: otp,
             });
+            console.debug('[DEBUG][VerifyOTP] Verify response:', JSON.stringify(response));
 
             if (response.error) {
-                console.log('OTP Verification Failed', response);
+                console.debug('[DEBUG][VerifyOTP] Verification failed:', response);
                 setError(response.message || 'Verification failed.');
                 return;
             }
 
-            console.log('OTP Verification Successful', response);
+            console.debug('[DEBUG][VerifyOTP] Verification successful');
             Alert.alert("Success", "Account activated successfully!", [
                 { text: "OK", onPress: () => router.replace('/signin') }
             ]);
         } catch (err: any) {
+            console.error('[DEBUG][VerifyOTP] Verify error:', err);
             setError(err.message || 'Failed to verify OTP.');
         } finally {
             setLoading(false);

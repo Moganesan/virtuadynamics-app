@@ -1,7 +1,11 @@
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AppColors } from '@/constants/theme';
-import React, { useRef, useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { incidentsService } from '@/services/api';
+import { getSocket } from '@/services/socket';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+    ActivityIndicator,
     Animated,
     Modal,
     ScrollView,
@@ -30,93 +34,6 @@ interface AnomalyRecord {
     notes: string;
 }
 
-const HISTORY: AnomalyRecord[] = [
-    {
-        id: '1',
-        date: 'Mar 04, 2026',
-        time: '14:32',
-        anomalyType: 'Cardiac Anomaly',
-        severity: 'critical',
-        routedTo: 'Dr. Sarah Chen',
-        routedRole: 'Cardiologist',
-        droneId: 'VD-Responder Beta',
-        location: 'Sector 4, Block C',
-        hasRecording: true,
-        recordingDuration: '3:42',
-        notes: 'Irregular heart rhythm detected. Drone dispatched within 90s.',
-    },
-    {
-        id: '2',
-        date: 'Mar 03, 2026',
-        time: '09:15',
-        anomalyType: 'Fall Detected',
-        severity: 'warning',
-        routedTo: 'Nurse Station 2',
-        routedRole: 'On-Duty Nurse',
-        droneId: 'VD-Responder Alpha',
-        location: 'Room 12, Ward B',
-        hasRecording: true,
-        recordingDuration: '1:18',
-        notes: 'Patient fall detected via accelerometer spike. Nurse responded in 4 mins.',
-    },
-    {
-        id: '3',
-        date: 'Mar 02, 2026',
-        time: '22:47',
-        anomalyType: 'Respiratory Distress',
-        severity: 'critical',
-        routedTo: 'Emergency Services',
-        routedRole: 'Paramedic Team',
-        droneId: 'VD-Responder Beta',
-        location: 'Outdoor Zone A',
-        hasRecording: true,
-        recordingDuration: '5:09',
-        notes: 'SpO₂ dropped below 88%. Emergency services alerted immediately.',
-    },
-    {
-        id: '4',
-        date: 'Mar 01, 2026',
-        time: '11:03',
-        anomalyType: 'High Temperature',
-        severity: 'warning',
-        routedTo: 'Dr. Raj Patel',
-        routedRole: 'General Physician',
-        droneId: 'VD-Scout Delta',
-        location: 'Room 7, Ward A',
-        hasRecording: false,
-        recordingDuration: '',
-        notes: 'Body temperature exceeded 39.2°C. Medication administered.',
-    },
-    {
-        id: '5',
-        date: 'Feb 28, 2026',
-        time: '16:55',
-        anomalyType: 'Irregular Heart Rate',
-        severity: 'resolved',
-        routedTo: 'Dr. Mei Lin',
-        routedRole: 'Cardiologist',
-        droneId: 'VD-Responder Alpha',
-        location: 'Corridor 3',
-        hasRecording: true,
-        recordingDuration: '2:27',
-        notes: 'Brief arrhythmia episode. Patient stabilised within 10 minutes.',
-    },
-    {
-        id: '6',
-        date: 'Feb 27, 2026',
-        time: '07:22',
-        anomalyType: 'Low Blood Oxygen',
-        severity: 'resolved',
-        routedTo: 'Nurse Station 1',
-        routedRole: 'On-Duty Nurse',
-        droneId: 'VD-Responder Gamma',
-        location: 'ICU Bay 2',
-        hasRecording: false,
-        recordingDuration: '',
-        notes: 'SpO₂ at 91%, improved after supplemental oxygen.',
-    },
-];
-
 const SEVERITY_CONFIG: Record<Severity, { label: string; color: string; bg: string; icon: string }> = {
     critical: { label: 'Critical', color: AppColors.critical, bg: `${AppColors.critical}15`, icon: 'exclamationmark.triangle.fill' },
     warning:  { label: 'Warning',  color: AppColors.warning,  bg: `${AppColors.warning}15`,  icon: 'exclamationmark.triangle.fill' },
@@ -131,15 +48,78 @@ const FILTERS: { label: string; value: FilterType }[] = [
 ];
 
 export default function HistoryScreen() {
+    const { localToken } = useAuth();
+    const [incidents, setIncidents] = useState<AnomalyRecord[]>([]);
+    const [loading, setLoading] = useState(true);
     const [activeFilter, setActiveFilter] = useState<FilterType>('all');
     const [selectedRecord, setSelectedRecord] = useState<AnomalyRecord | null>(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [playProgress] = useState(new Animated.Value(0));
     const playAnim = useRef<Animated.CompositeAnimation | null>(null);
 
+    const mapIncident = (inc: any): AnomalyRecord => ({
+        id: inc.id,
+        date: inc.date,
+        time: inc.time,
+        anomalyType: inc.anomalyType,
+        severity: inc.severity as Severity,
+        routedTo: inc.routedTo,
+        routedRole: inc.routedRole,
+        droneId: inc.droneId,
+        location: inc.location,
+        hasRecording: inc.hasRecording ?? false,
+        recordingDuration: inc.recordingDuration ?? '',
+        notes: inc.notes ?? '',
+    });
+
+    const fetchIncidents = useCallback(async () => {
+        if (!localToken) return;
+        console.debug('[DEBUG][Monitoring] Fetching incidents...');
+        try {
+            const res = await incidentsService.getAll(localToken);
+            console.debug('[DEBUG][Monitoring] Incidents response:', JSON.stringify(res));
+            if (res.success && res.data) {
+                setIncidents(res.data.map(mapIncident));
+            }
+        } catch (err) {
+            console.error('[DEBUG][Monitoring] Fetch error:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, [localToken]);
+
+    useEffect(() => {
+        fetchIncidents();
+    }, [fetchIncidents]);
+
+    // Real-time socket listeners
+    useEffect(() => {
+        const socket = getSocket();
+
+        const handleNewIncident = (inc: any) => {
+            console.debug('[DEBUG][Monitoring] Socket new incident:', JSON.stringify(inc));
+            setIncidents((prev) => [mapIncident(inc), ...prev]);
+        };
+
+        const handleSeverityChanged = (updated: any) => {
+            console.debug('[DEBUG][Monitoring] Socket severity changed:', JSON.stringify(updated));
+            setIncidents((prev) =>
+                prev.map((inc) => (inc.id === updated.id ? mapIncident(updated) : inc))
+            );
+        };
+
+        socket.on('incidents:new', handleNewIncident);
+        socket.on('incidents:severityChanged', handleSeverityChanged);
+
+        return () => {
+            socket.off('incidents:new', handleNewIncident);
+            socket.off('incidents:severityChanged', handleSeverityChanged);
+        };
+    }, []);
+
     const filtered = activeFilter === 'all'
-        ? HISTORY
-        : HISTORY.filter((r) => r.severity === activeFilter);
+        ? incidents
+        : incidents.filter((r) => r.severity === activeFilter);
 
     const handlePlay = (record: AnomalyRecord) => {
         setSelectedRecord(record);
@@ -174,9 +154,9 @@ export default function HistoryScreen() {
         setSelectedRecord(null);
     };
 
-    const criticalCount = HISTORY.filter((r) => r.severity === 'critical').length;
-    const warningCount  = HISTORY.filter((r) => r.severity === 'warning').length;
-    const resolvedCount = HISTORY.filter((r) => r.severity === 'resolved').length;
+    const criticalCount = incidents.filter((r) => r.severity === 'critical').length;
+    const warningCount  = incidents.filter((r) => r.severity === 'warning').length;
+    const resolvedCount = incidents.filter((r) => r.severity === 'resolved').length;
 
     return (
         <View style={styles.screen}>
@@ -218,6 +198,13 @@ export default function HistoryScreen() {
                 </View>
 
                 {/* Records */}
+                {loading ? (
+                    <ActivityIndicator size="large" color={AppColors.primary} style={{ marginTop: 40 }} />
+                ) : incidents.length === 0 ? (
+                    <View style={{ alignItems: 'center', marginTop: 40 }}>
+                        <Text style={{ color: AppColors.textSecondary, fontSize: 15 }}>No incidents recorded</Text>
+                    </View>
+                ) : null}
                 <View style={styles.recordList}>
                     {filtered.map((record) => {
                         const cfg = SEVERITY_CONFIG[record.severity];

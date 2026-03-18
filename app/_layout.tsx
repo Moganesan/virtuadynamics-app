@@ -7,7 +7,7 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 
 function AuthGate() {
-    const { user, isLoading } = useAuth();
+    const { user, isLoading, needsOnboarding } = useAuth();
     const segments = useSegments();
     const router = useRouter();
 
@@ -19,16 +19,20 @@ function AuthGate() {
         const currentSegment = segments[0] as string;
         const inProtectedRoute = currentSegment === '(tabs)';
         const inAuthScreen = ['signin', 'signup', 'index'].includes(currentSegment);
+        const inOnboarding = currentSegment === 'onboarding';
 
         if (!user && inProtectedRoute) {
             // Unauthenticated user hit a protected tab → send to signin
             router.replace('/signin');
-        } else if (user && inAuthScreen) {
-            // Already logged in but landed on an auth/entry screen → send to dashboard
+        } else if (user && needsOnboarding && !inOnboarding) {
+            // Logged in but profile not created → send to onboarding
+            router.replace('/onboarding');
+        } else if (user && !needsOnboarding && (inAuthScreen || inOnboarding)) {
+            // Fully onboarded user on auth/onboarding screen → send to dashboard
             router.replace('/(tabs)/dashboard');
         }
-        // All other routes (verify-otp, onboarding, etc.) are left alone
-    }, [user, segments, isLoading]);
+        // All other routes (verify-otp, etc.) are left alone
+    }, [user, segments, isLoading, needsOnboarding]);
 
     return (
         <Stack>

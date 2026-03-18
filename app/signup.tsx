@@ -43,14 +43,16 @@ export default function Login() {
 
     try {
       setLoading(true);
+      console.debug(`[DEBUG][SignUp] Attempting signup for email=${email}, username=${username}`);
       const response = await authService.signup({
         email,
         password,
         confirm_password: confirmPassword,
         username,
       });
+      console.debug('[DEBUG][SignUp] Signup response:', JSON.stringify(response));
       if (response.error) {
-        console.log('SignUp Failed', response);
+        console.debug('[DEBUG][SignUp] Signup failed:', response);
         if (response.message && response.message.includes('not activated')) {
           router.replace({
             pathname: '/verify-otp',
@@ -61,13 +63,14 @@ export default function Login() {
         setError(response.message || 'Signup failed.');
         return;
       }
-      console.log('Signup Successful', response);
+      console.debug('[DEBUG][SignUp] Signup successful:', response);
       // Optional: Redirect locally to login or home
       router.replace({
         pathname: '/verify-otp',
         params: { email }
       });
     } catch (err: any) {
+      console.error('[DEBUG][SignUp] Signup error:', err);
       setError(err.message || 'Failed to sign up.');
     } finally {
       setLoading(false);
