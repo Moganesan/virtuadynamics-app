@@ -29,6 +29,7 @@ async function seedIfEmpty() {
         droneId: "drone-1",
         location: "Zone A - Block 5",
         hasRecording: true,
+        recordingUrl: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
         recordingDuration: "2:45",
         notes: "Patient showed elevated HR above 160 BPM for 3 minutes.",
       },

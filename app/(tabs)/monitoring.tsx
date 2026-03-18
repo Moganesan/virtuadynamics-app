@@ -3,6 +3,7 @@ import { AppColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { incidentsService } from '@/services/api';
 import { getSocket } from '@/services/socket';
+import { Audio } from 'expo-av';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
@@ -30,6 +31,7 @@ interface AnomalyRecord {
     droneId: string;
     location: string;
     hasRecording: boolean;
+    recordingUrl: string;
     recordingDuration: string;
     notes: string;
 }
@@ -56,6 +58,9 @@ export default function HistoryScreen() {
     const [isPlaying, setIsPlaying] = useState(false);
     const [playProgress] = useState(new Animated.Value(0));
     const playAnim = useRef<Animated.CompositeAnimation | null>(null);
+    const soundRef = useRef<Audio.Sound | null>(null);
+    const [audioDuration, setAudioDuration] = useState(0);
+    const [audioPosition, setAudioPosition] = useState(0);
 
     const mapIncident = (inc: any): AnomalyRecord => ({
         id: inc.id,
@@ -68,6 +73,7 @@ export default function HistoryScreen() {
         droneId: inc.droneId,
         location: inc.location,
         hasRecording: inc.hasRecording ?? false,
+        recordingUrl: inc.recordingUrl ?? '',
         recordingDuration: inc.recordingDuration ?? '',
         notes: inc.notes ?? '',
     });
@@ -121,38 +127,78 @@ export default function HistoryScreen() {
         ? incidents
         : incidents.filter((r) => r.severity === activeFilter);
 
-    const handlePlay = (record: AnomalyRecord) => {
+    const handlePlay = async (record: AnomalyRecord) => {
+        // Clean up any previous sound
+        if (soundRef.current) {
+            await soundRef.current.unloadAsync();
+            soundRef.current = null;
+        }
         setSelectedRecord(record);
         setIsPlaying(false);
+        setAudioDuration(0);
+        setAudioPosition(0);
         playProgress.setValue(0);
-    };
 
-    const togglePlay = () => {
-        if (isPlaying) {
-            playAnim.current?.stop();
-            setIsPlaying(false);
-        } else {
-            setIsPlaying(true);
-            playAnim.current = Animated.timing(playProgress, {
-                toValue: 1,
-                duration: 8000,
-                useNativeDriver: false,
-            });
-            playAnim.current.start(({ finished }) => {
-                if (finished) {
-                    setIsPlaying(false);
-                    playProgress.setValue(0);
-                }
-            });
+        if (record.recordingUrl) {
+            try {
+                await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+                const { sound } = await Audio.Sound.createAsync(
+                    { uri: record.recordingUrl },
+                    { shouldPlay: false },
+                    (status) => {
+                        if (!status.isLoaded) return;
+                        setAudioPosition(status.positionMillis);
+                        if (status.durationMillis) {
+                            setAudioDuration(status.durationMillis);
+                            playProgress.setValue(status.positionMillis / status.durationMillis);
+                        }
+                        if (status.didJustFinish) {
+                            setIsPlaying(false);
+                            playProgress.setValue(0);
+                        }
+                    },
+                );
+                soundRef.current = sound;
+            } catch (err) {
+                console.error('[Monitoring] Failed to load recording:', err);
+            }
         }
     };
 
-    const closePlayer = () => {
-        playAnim.current?.stop();
+    const togglePlay = async () => {
+        if (!soundRef.current) return;
+        if (isPlaying) {
+            await soundRef.current.pauseAsync();
+            setIsPlaying(false);
+        } else {
+            const status = await soundRef.current.getStatusAsync();
+            if (status.isLoaded && status.positionMillis === status.durationMillis) {
+                await soundRef.current.setPositionAsync(0);
+            }
+            await soundRef.current.playAsync();
+            setIsPlaying(true);
+        }
+    };
+
+    const closePlayer = async () => {
+        if (soundRef.current) {
+            await soundRef.current.stopAsync();
+            await soundRef.current.unloadAsync();
+            soundRef.current = null;
+        }
         setIsPlaying(false);
+        setAudioDuration(0);
+        setAudioPosition(0);
         playProgress.setValue(0);
         setSelectedRecord(null);
     };
+
+    // Cleanup sound on unmount
+    useEffect(() => {
+        return () => {
+            soundRef.current?.unloadAsync();
+        };
+    }, []);
 
     const criticalCount = incidents.filter((r) => r.severity === 'critical').length;
     const warningCount  = incidents.filter((r) => r.severity === 'warning').length;
@@ -348,8 +394,8 @@ export default function HistoryScreen() {
                                 />
                             </View>
                             <View style={styles.seekLabels}>
-                                <Text style={styles.seekTime}>0:00</Text>
-                                <Text style={styles.seekTime}>{selectedRecord.recordingDuration}</Text>
+                                <Text style={styles.seekTime}>{formatMs(audioPosition)}</Text>
+                                <Text style={styles.seekTime}>{audioDuration > 0 ? formatMs(audioDuration) : selectedRecord.recordingDuration}</Text>
                             </View>
                         </View>
 
@@ -374,6 +420,14 @@ export default function HistoryScreen() {
             </Modal>
         </View>
     );
+}
+
+/** Format milliseconds to m:ss */
+function formatMs(ms: number): string {
+    const totalSec = Math.floor(ms / 1000);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${min}:${sec.toString().padStart(2, '0')}`;
 }
 
 /** Animated waveform bars for the player */

@@ -11,6 +11,7 @@ const incidentSchema = new mongoose.Schema({
   droneId: { type: String, default: null },
   location: { type: String, default: null },
   hasRecording: { type: Boolean, default: false },
+  recordingUrl: { type: String, default: null },
   recordingDuration: { type: String, default: null },
   notes: { type: String, default: "" },
   createdAt: { type: Date, default: Date.now },

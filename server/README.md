@@ -106,7 +106,7 @@ Authorization: Bearer <token>
 |--------|------|-------------|
 | GET | `/api/incidents` | List incidents (optional `severity` filter, supports `limit` & `offset`) |
 | GET | `/api/incidents/:id` | Get a specific incident |
-| POST | `/api/incidents` | Create an incident (required: `anomalyType`, `severity`) |
+| POST | `/api/incidents` | Create an incident (required: `anomalyType`, `severity`; optional: `recordingUrl` for call recording MP3) |
 | PUT | `/api/incidents/:id` | Update an incident |
 | PATCH | `/api/incidents/:id/severity` | Quick severity update (critical, warning, resolved) |
 | DELETE | `/api/incidents/:id` | Delete an incident |

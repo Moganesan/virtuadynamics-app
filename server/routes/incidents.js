@@ -46,7 +46,7 @@ router.post("/", async (req, res) => {
   try {
     const {
       date, time, anomalyType, severity, routedTo, routedRole,
-      droneId, location, hasRecording, recordingDuration, notes,
+      droneId, location, hasRecording, recordingUrl, recordingDuration, notes,
     } = req.body;
 
     if (!anomalyType || !severity) {
@@ -68,6 +68,7 @@ router.post("/", async (req, res) => {
       droneId: droneId || null,
       location: location || null,
       hasRecording: hasRecording || false,
+      recordingUrl: recordingUrl || null,
       recordingDuration: recordingDuration || null,
       notes: notes || "",
     });
@@ -85,7 +86,7 @@ router.post("/", async (req, res) => {
 // PUT /api/incidents/:id — update incident
 router.put("/:id", async (req, res) => {
   try {
-    const fields = ["date", "time", "anomalyType", "severity", "routedTo", "routedRole", "droneId", "location", "hasRecording", "recordingDuration", "notes"];
+    const fields = ["date", "time", "anomalyType", "severity", "routedTo", "routedRole", "droneId", "location", "hasRecording", "recordingUrl", "recordingDuration", "notes"];
     const updates = {};
     for (const field of fields) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
