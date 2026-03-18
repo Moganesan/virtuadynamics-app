@@ -1,6 +1,5 @@
 const express = require("express");
-const { v4: uuidv4 } = require("uuid");
-const { emergencyContacts } = require("../data/db");
+const EmergencyContact = require("../models/EmergencyContact");
 const { authenticate } = require("../middleware/auth");
 
 const router = express.Router();
@@ -10,74 +9,99 @@ const VALID_ROLES = ["Friend", "Relative", "Doctor"];
 router.use(authenticate);
 
 // GET /api/contacts — list own emergency contacts
-router.get("/", (req, res) => {
-  const contacts = emergencyContacts.filter((c) => c.userId === req.user.id);
-  res.json({ success: true, data: contacts, total: contacts.length });
+router.get("/", async (req, res) => {
+  try {
+    const contacts = await EmergencyContact.find({ userId: req.user.id });
+    res.json({ success: true, data: contacts, total: contacts.length });
+  } catch (err) {
+    console.error("Get contacts error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
 // GET /api/contacts/:id
-router.get("/:id", (req, res) => {
-  const contact = emergencyContacts.find((c) => c.id === req.params.id && c.userId === req.user.id);
-  if (!contact) return res.status(404).json({ success: false, message: "Contact not found" });
+router.get("/:id", async (req, res) => {
+  try {
+    const contact = await EmergencyContact.findOne({ _id: req.params.id, userId: req.user.id });
+    if (!contact) return res.status(404).json({ success: false, message: "Contact not found" });
 
-  res.json({ success: true, data: contact });
+    res.json({ success: true, data: contact });
+  } catch (err) {
+    console.error("Get contact error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
 // POST /api/contacts — add emergency contact
-router.post("/", (req, res) => {
-  const { name, phone, role } = req.body;
+router.post("/", async (req, res) => {
+  try {
+    const { name, phone, role } = req.body;
 
-  if (!name || !phone) {
-    return res.status(400).json({ success: false, message: "name and phone are required" });
+    if (!name || !phone) {
+      return res.status(400).json({ success: false, message: "name and phone are required" });
+    }
+    if (role && !VALID_ROLES.includes(role)) {
+      return res.status(400).json({ success: false, message: `role must be one of: ${VALID_ROLES.join(", ")}` });
+    }
+
+    const duplicate = await EmergencyContact.findOne({ userId: req.user.id, phone });
+    if (duplicate) {
+      return res.status(409).json({ success: false, message: "A contact with this phone number already exists" });
+    }
+
+    const contact = await EmergencyContact.create({
+      userId: req.user.id,
+      name,
+      phone,
+      role: role || "Friend",
+    });
+
+    res.status(201).json({ success: true, data: contact });
+  } catch (err) {
+    console.error("Create contact error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
-  if (role && !VALID_ROLES.includes(role)) {
-    return res.status(400).json({ success: false, message: `role must be one of: ${VALID_ROLES.join(", ")}` });
-  }
-
-  // Duplicate phone check per user
-  const duplicate = emergencyContacts.find((c) => c.userId === req.user.id && c.phone === phone);
-  if (duplicate) {
-    return res.status(409).json({ success: false, message: "A contact with this phone number already exists" });
-  }
-
-  const contact = {
-    id: uuidv4(),
-    userId: req.user.id,
-    name,
-    phone,
-    role: role || "Friend",
-    createdAt: new Date().toISOString(),
-  };
-  emergencyContacts.push(contact);
-
-  res.status(201).json({ success: true, data: contact });
 });
 
 // PUT /api/contacts/:id — update contact
-router.put("/:id", (req, res) => {
-  const contact = emergencyContacts.find((c) => c.id === req.params.id && c.userId === req.user.id);
-  if (!contact) return res.status(404).json({ success: false, message: "Contact not found" });
+router.put("/:id", async (req, res) => {
+  try {
+    const { name, phone, role } = req.body;
 
-  const { name, phone, role } = req.body;
+    if (role && !VALID_ROLES.includes(role)) {
+      return res.status(400).json({ success: false, message: `role must be one of: ${VALID_ROLES.join(", ")}` });
+    }
 
-  if (role && !VALID_ROLES.includes(role)) {
-    return res.status(400).json({ success: false, message: `role must be one of: ${VALID_ROLES.join(", ")}` });
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (phone !== undefined) updates.phone = phone;
+    if (role !== undefined) updates.role = role;
+
+    const contact = await EmergencyContact.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { $set: updates },
+      { new: true }
+    );
+    if (!contact) return res.status(404).json({ success: false, message: "Contact not found" });
+
+    res.json({ success: true, data: contact });
+  } catch (err) {
+    console.error("Update contact error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
-
-  if (name !== undefined) contact.name = name;
-  if (phone !== undefined) contact.phone = phone;
-  if (role !== undefined) contact.role = role;
-
-  res.json({ success: true, data: contact });
 });
 
 // DELETE /api/contacts/:id
-router.delete("/:id", (req, res) => {
-  const index = emergencyContacts.findIndex((c) => c.id === req.params.id && c.userId === req.user.id);
-  if (index === -1) return res.status(404).json({ success: false, message: "Contact not found" });
+router.delete("/:id", async (req, res) => {
+  try {
+    const contact = await EmergencyContact.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
+    if (!contact) return res.status(404).json({ success: false, message: "Contact not found" });
 
-  emergencyContacts.splice(index, 1);
-  res.json({ success: true, message: "Contact deleted" });
+    res.json({ success: true, message: "Contact deleted" });
+  } catch (err) {
+    console.error("Delete contact error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
 module.exports = router;

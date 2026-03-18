@@ -1,6 +1,5 @@
 const express = require("express");
-const { v4: uuidv4 } = require("uuid");
-const { drones } = require("../data/db");
+const Drone = require("../models/Drone");
 const { authenticate } = require("../middleware/auth");
 
 const router = express.Router();
@@ -10,84 +9,123 @@ const VALID_STATUSES = ["standby", "active", "charging", "offline"];
 router.use(authenticate);
 
 // GET /api/drones — list all drones
-router.get("/", (req, res) => {
-  const { status } = req.query;
-  const result = status ? drones.filter((d) => d.status === status) : drones;
-  res.json({ success: true, data: result, total: result.length });
+router.get("/", async (req, res) => {
+  try {
+    const { status } = req.query;
+    const query = status ? { status } : {};
+    const drones = await Drone.find(query);
+    res.json({ success: true, data: drones, total: drones.length });
+  } catch (err) {
+    console.error("Get drones error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
 // GET /api/drones/:id
-router.get("/:id", (req, res) => {
-  const drone = drones.find((d) => d.id === req.params.id);
-  if (!drone) return res.status(404).json({ success: false, message: "Drone not found" });
+router.get("/:id", async (req, res) => {
+  try {
+    const drone = await Drone.findById(req.params.id);
+    if (!drone) return res.status(404).json({ success: false, message: "Drone not found" });
 
-  res.json({ success: true, data: drone });
+    res.json({ success: true, data: drone });
+  } catch (err) {
+    console.error("Get drone error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
 // POST /api/drones — add a new drone
-router.post("/", (req, res) => {
-  const { name, status, location, battery, speed } = req.body;
+router.post("/", async (req, res) => {
+  try {
+    const { name, status, location, battery, speed } = req.body;
 
-  if (!name) return res.status(400).json({ success: false, message: "Drone name is required" });
-  if (status && !VALID_STATUSES.includes(status)) {
-    return res.status(400).json({ success: false, message: `Status must be one of: ${VALID_STATUSES.join(", ")}` });
+    if (!name) return res.status(400).json({ success: false, message: "Drone name is required" });
+    if (status && !VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: `Status must be one of: ${VALID_STATUSES.join(", ")}` });
+    }
+
+    const drone = await Drone.create({
+      name,
+      status: status || "standby",
+      location: location || "Unknown",
+      battery: battery ?? 100,
+      speed: speed ?? 0,
+    });
+
+    const io = req.app.get("io");
+    io.emit("drones:new", drone.toJSON());
+
+    res.status(201).json({ success: true, data: drone });
+  } catch (err) {
+    console.error("Create drone error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
-
-  const drone = {
-    id: uuidv4(),
-    name,
-    status: status || "standby",
-    location: location || "Unknown",
-    battery: battery ?? 100,
-    speed: speed ?? 0,
-    createdAt: new Date().toISOString(),
-  };
-  drones.push(drone);
-
-  res.status(201).json({ success: true, data: drone });
 });
 
 // PUT /api/drones/:id — update drone
-router.put("/:id", (req, res) => {
-  const drone = drones.find((d) => d.id === req.params.id);
-  if (!drone) return res.status(404).json({ success: false, message: "Drone not found" });
+router.put("/:id", async (req, res) => {
+  try {
+    const { name, status, location, battery, speed } = req.body;
 
-  const { name, status, location, battery, speed } = req.body;
+    if (status && !VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: `Status must be one of: ${VALID_STATUSES.join(", ")}` });
+    }
 
-  if (status && !VALID_STATUSES.includes(status)) {
-    return res.status(400).json({ success: false, message: `Status must be one of: ${VALID_STATUSES.join(", ")}` });
+    const updates = {};
+    if (name !== undefined) updates.name = name;
+    if (status !== undefined) updates.status = status;
+    if (location !== undefined) updates.location = location;
+    if (battery !== undefined) updates.battery = battery;
+    if (speed !== undefined) updates.speed = speed;
+
+    const drone = await Drone.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true });
+    if (!drone) return res.status(404).json({ success: false, message: "Drone not found" });
+
+    const io = req.app.get("io");
+    io.emit("drones:updated", drone.toJSON());
+
+    res.json({ success: true, data: drone });
+  } catch (err) {
+    console.error("Update drone error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
-
-  if (name !== undefined) drone.name = name;
-  if (status !== undefined) drone.status = status;
-  if (location !== undefined) drone.location = location;
-  if (battery !== undefined) drone.battery = battery;
-  if (speed !== undefined) drone.speed = speed;
-
-  res.json({ success: true, data: drone });
 });
 
 // PATCH /api/drones/:id/status — quick status update
-router.patch("/:id/status", (req, res) => {
-  const drone = drones.find((d) => d.id === req.params.id);
-  if (!drone) return res.status(404).json({ success: false, message: "Drone not found" });
+router.patch("/:id/status", async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!status || !VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: `Status must be one of: ${VALID_STATUSES.join(", ")}` });
+    }
 
-  const { status } = req.body;
-  if (!status || !VALID_STATUSES.includes(status)) {
-    return res.status(400).json({ success: false, message: `Status must be one of: ${VALID_STATUSES.join(", ")}` });
+    const drone = await Drone.findByIdAndUpdate(req.params.id, { status }, { new: true });
+    if (!drone) return res.status(404).json({ success: false, message: "Drone not found" });
+
+    const io = req.app.get("io");
+    io.emit("drones:statusChanged", drone.toJSON());
+
+    res.json({ success: true, data: drone });
+  } catch (err) {
+    console.error("Patch drone status error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
-
-  drone.status = status;
-  res.json({ success: true, data: drone });
 });
 
 // DELETE /api/drones/:id
-router.delete("/:id", (req, res) => {
-  const index = drones.findIndex((d) => d.id === req.params.id);
-  if (index === -1) return res.status(404).json({ success: false, message: "Drone not found" });
+router.delete("/:id", async (req, res) => {
+  try {
+    const drone = await Drone.findByIdAndDelete(req.params.id);
+    if (!drone) return res.status(404).json({ success: false, message: "Drone not found" });
 
-  drones.splice(index, 1);
-  res.json({ success: true, message: "Drone deleted" });
+    const io = req.app.get("io");
+    io.emit("drones:deleted", { id: drone._id.toString() });
+
+    res.json({ success: true, message: "Drone deleted" });
+  } catch (err) {
+    console.error("Delete drone error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
 module.exports = router;

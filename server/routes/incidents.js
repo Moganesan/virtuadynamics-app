@@ -1,6 +1,5 @@
 const express = require("express");
-const { v4: uuidv4 } = require("uuid");
-const { incidents } = require("../data/db");
+const Incident = require("../models/Incident");
 const { authenticate } = require("../middleware/auth");
 
 const router = express.Router();
@@ -9,102 +8,139 @@ const VALID_SEVERITIES = ["critical", "warning", "resolved"];
 
 router.use(authenticate);
 
-// GET /api/incidents — list incidents (user-scoped or all if admin)
-router.get("/", (req, res) => {
-  const { severity, limit = 20, offset = 0 } = req.query;
+// GET /api/incidents — list incidents (user-scoped + global)
+router.get("/", async (req, res) => {
+  try {
+    const { severity, limit = 20, offset = 0 } = req.query;
+    const query = { $or: [{ userId: req.user.id }, { userId: null }] };
+    if (severity) query.severity = severity;
 
-  let result = incidents.filter((i) => i.userId === req.user.id || i.userId === null);
-  if (severity) result = result.filter((i) => i.severity === severity);
+    const total = await Incident.countDocuments(query);
+    const data = await Incident.find(query)
+      .sort({ createdAt: -1 })
+      .skip(Number(offset))
+      .limit(Number(limit));
 
-  result = result
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(Number(offset), Number(offset) + Number(limit));
-
-  res.json({ success: true, data: result, total: result.length });
+    res.json({ success: true, data, total });
+  } catch (err) {
+    console.error("Get incidents error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
 // GET /api/incidents/:id
-router.get("/:id", (req, res) => {
-  const incident = incidents.find((i) => i.id === req.params.id);
-  if (!incident) return res.status(404).json({ success: false, message: "Incident not found" });
+router.get("/:id", async (req, res) => {
+  try {
+    const incident = await Incident.findById(req.params.id);
+    if (!incident) return res.status(404).json({ success: false, message: "Incident not found" });
 
-  res.json({ success: true, data: incident });
+    res.json({ success: true, data: incident });
+  } catch (err) {
+    console.error("Get incident error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
 // POST /api/incidents — create incident
-router.post("/", (req, res) => {
-  const {
-    date, time, anomalyType, severity, routedTo, routedRole,
-    droneId, location, hasRecording, recordingDuration, notes,
-  } = req.body;
+router.post("/", async (req, res) => {
+  try {
+    const {
+      date, time, anomalyType, severity, routedTo, routedRole,
+      droneId, location, hasRecording, recordingDuration, notes,
+    } = req.body;
 
-  if (!anomalyType || !severity) {
-    return res.status(400).json({ success: false, message: "anomalyType and severity are required" });
+    if (!anomalyType || !severity) {
+      return res.status(400).json({ success: false, message: "anomalyType and severity are required" });
+    }
+    if (!VALID_SEVERITIES.includes(severity)) {
+      return res.status(400).json({ success: false, message: `severity must be one of: ${VALID_SEVERITIES.join(", ")}` });
+    }
+
+    const now = new Date();
+    const incident = await Incident.create({
+      userId: req.user.id,
+      date: date || now.toISOString().split("T")[0],
+      time: time || now.toTimeString().slice(0, 5),
+      anomalyType,
+      severity,
+      routedTo: routedTo || null,
+      routedRole: routedRole || null,
+      droneId: droneId || null,
+      location: location || null,
+      hasRecording: hasRecording || false,
+      recordingDuration: recordingDuration || null,
+      notes: notes || "",
+    });
+
+    const io = req.app.get("io");
+    io.emit("incidents:new", incident.toJSON());
+
+    res.status(201).json({ success: true, data: incident });
+  } catch (err) {
+    console.error("Create incident error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
-  if (!VALID_SEVERITIES.includes(severity)) {
-    return res.status(400).json({ success: false, message: `severity must be one of: ${VALID_SEVERITIES.join(", ")}` });
-  }
-
-  const now = new Date();
-  const incident = {
-    id: uuidv4(),
-    userId: req.user.id,
-    date: date || now.toISOString().split("T")[0],
-    time: time || now.toTimeString().slice(0, 5),
-    anomalyType,
-    severity,
-    routedTo: routedTo || null,
-    routedRole: routedRole || null,
-    droneId: droneId || null,
-    location: location || null,
-    hasRecording: hasRecording || false,
-    recordingDuration: recordingDuration || null,
-    notes: notes || "",
-    createdAt: now.toISOString(),
-  };
-  incidents.push(incident);
-
-  res.status(201).json({ success: true, data: incident });
 });
 
 // PUT /api/incidents/:id — update incident
-router.put("/:id", (req, res) => {
-  const incident = incidents.find((i) => i.id === req.params.id && i.userId === req.user.id);
-  if (!incident) return res.status(404).json({ success: false, message: "Incident not found" });
+router.put("/:id", async (req, res) => {
+  try {
+    const fields = ["date", "time", "anomalyType", "severity", "routedTo", "routedRole", "droneId", "location", "hasRecording", "recordingDuration", "notes"];
+    const updates = {};
+    for (const field of fields) {
+      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    }
 
-  const fields = ["date", "time", "anomalyType", "severity", "routedTo", "routedRole", "droneId", "location", "hasRecording", "recordingDuration", "notes"];
-  for (const field of fields) {
-    if (req.body[field] !== undefined) incident[field] = req.body[field];
+    if (updates.severity && !VALID_SEVERITIES.includes(updates.severity)) {
+      return res.status(400).json({ success: false, message: `severity must be one of: ${VALID_SEVERITIES.join(", ")}` });
+    }
+
+    const incident = await Incident.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { $set: updates },
+      { new: true }
+    );
+    if (!incident) return res.status(404).json({ success: false, message: "Incident not found" });
+
+    res.json({ success: true, data: incident });
+  } catch (err) {
+    console.error("Update incident error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
-
-  if (incident.severity && !VALID_SEVERITIES.includes(incident.severity)) {
-    return res.status(400).json({ success: false, message: `severity must be one of: ${VALID_SEVERITIES.join(", ")}` });
-  }
-
-  res.json({ success: true, data: incident });
 });
 
 // PATCH /api/incidents/:id/severity — quick severity update
-router.patch("/:id/severity", (req, res) => {
-  const incident = incidents.find((i) => i.id === req.params.id);
-  if (!incident) return res.status(404).json({ success: false, message: "Incident not found" });
+router.patch("/:id/severity", async (req, res) => {
+  try {
+    const { severity } = req.body;
+    if (!severity || !VALID_SEVERITIES.includes(severity)) {
+      return res.status(400).json({ success: false, message: `severity must be one of: ${VALID_SEVERITIES.join(", ")}` });
+    }
 
-  const { severity } = req.body;
-  if (!severity || !VALID_SEVERITIES.includes(severity)) {
-    return res.status(400).json({ success: false, message: `severity must be one of: ${VALID_SEVERITIES.join(", ")}` });
+    const incident = await Incident.findByIdAndUpdate(req.params.id, { severity }, { new: true });
+    if (!incident) return res.status(404).json({ success: false, message: "Incident not found" });
+
+    const io = req.app.get("io");
+    io.emit("incidents:severityChanged", incident.toJSON());
+
+    res.json({ success: true, data: incident });
+  } catch (err) {
+    console.error("Patch incident severity error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
-
-  incident.severity = severity;
-  res.json({ success: true, data: incident });
 });
 
 // DELETE /api/incidents/:id
-router.delete("/:id", (req, res) => {
-  const index = incidents.findIndex((i) => i.id === req.params.id && i.userId === req.user.id);
-  if (index === -1) return res.status(404).json({ success: false, message: "Incident not found" });
+router.delete("/:id", async (req, res) => {
+  try {
+    const incident = await Incident.findOneAndDelete({ _id: req.params.id, userId: req.user.id });
+    if (!incident) return res.status(404).json({ success: false, message: "Incident not found" });
 
-  incidents.splice(index, 1);
-  res.json({ success: true, message: "Incident deleted" });
+    res.json({ success: true, message: "Incident deleted" });
+  } catch (err) {
+    console.error("Delete incident error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
 });
 
 module.exports = router;

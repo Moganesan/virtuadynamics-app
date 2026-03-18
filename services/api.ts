@@ -1,4 +1,6 @@
 import * as Crypto from 'expo-crypto';
+import md5 from 'md5';
+import { Platform } from 'react-native';
 
 const BASE_URL = 'https://virtuagrid.com';
 const APP_ID = 'CRI4VNCFF4K6X2';
@@ -43,10 +45,12 @@ function generateSalt(): string {
 
 async function buildAuthHeaders(auth: VirtuaLoginAuth): Promise<Record<string, string>> {
     const salt = generateSalt();
-    const valueverifier = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.MD5,
-        salt + auth.seed_verifier,
-    );
+    const valueverifier = Platform.OS === 'web'
+        ? md5(salt + auth.seed_verifier)
+        : await Crypto.digestStringAsync(
+            Crypto.CryptoDigestAlgorithm.MD5,
+            salt + auth.seed_verifier,
+        );
     return {
         'X-Authorization': auth.api_token,
         'salt': salt,
@@ -72,6 +76,7 @@ export const apiClient = {
         }
 
         try {
+            console.debug(`[DEBUG][apiClient] POST ${url}`);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -81,6 +86,7 @@ export const apiClient = {
             });
 
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][apiClient] POST ${endpoint} → status=${response.status}`, responseData);
 
             if (!response.ok) {
                 throw new Error(responseData.message || responseData.error || 'Something went wrong during the request.');
@@ -88,7 +94,7 @@ export const apiClient = {
 
             return responseData;
         } catch (error) {
-            console.error('API Error:', error);
+            console.error(`[DEBUG][apiClient] POST ${endpoint} FAILED:`, error);
             throw error;
         }
     }
@@ -108,6 +114,7 @@ export const authenticatedClient = {
         }
 
         try {
+            console.debug(`[DEBUG][authenticatedClient] POST ${url}`);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -118,6 +125,7 @@ export const authenticatedClient = {
             });
 
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][authenticatedClient] POST ${endpoint} → status=${response.status}`, responseData);
 
             if (!response.ok) {
                 throw new Error(responseData.message || 'Something went wrong during the request.');
@@ -125,7 +133,7 @@ export const authenticatedClient = {
 
             return responseData;
         } catch (error) {
-            console.error('Authenticated API Error:', error);
+            console.error(`[DEBUG][authenticatedClient] POST ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -134,6 +142,7 @@ export const authenticatedClient = {
         const url = `${BASE_URL}${endpoint}`;
 
         try {
+            console.debug(`[DEBUG][authenticatedClient] GET ${url}`);
             const response = await fetch(url, {
                 method: 'GET',
                 headers: {
@@ -142,6 +151,7 @@ export const authenticatedClient = {
             });
 
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][authenticatedClient] GET ${endpoint} → status=${response.status}`, responseData);
 
             if (!response.ok) {
                 throw new Error(responseData.message || 'Something went wrong during the request.');
@@ -149,7 +159,7 @@ export const authenticatedClient = {
 
             return responseData;
         } catch (error) {
-            console.error('Authenticated API Error:', error);
+            console.error(`[DEBUG][authenticatedClient] GET ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -171,12 +181,14 @@ export const virtuaLoginClient = {
         }
 
         try {
+            console.debug(`[DEBUG][virtuaLoginClient] POST ${url}`);
             const response = await fetch(url, { method: 'POST', headers, body: formData });
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][virtuaLoginClient] POST ${endpoint} → status=${response.status}`, responseData);
             if (!response.ok) throw new Error(responseData.message || 'Request failed');
             return responseData;
         } catch (error) {
-            console.error('VirtuaLogin API Error:', error);
+            console.error(`[DEBUG][virtuaLoginClient] POST ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -187,16 +199,18 @@ export const virtuaLoginClient = {
         const headers = await buildAuthHeaders(auth);
 
         try {
+            console.debug(`[DEBUG][virtuaLoginClient] POST(JSON) ${url}`);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { ...headers, 'Content-Type': 'application/json' },
                 body: JSON.stringify(data),
             });
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][virtuaLoginClient] POST(JSON) ${endpoint} → status=${response.status}`, responseData);
             if (!response.ok) throw new Error(responseData.message || 'Request failed');
             return responseData;
         } catch (error) {
-            console.error('VirtuaLogin API Error:', error);
+            console.error(`[DEBUG][virtuaLoginClient] POST(JSON) ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -214,12 +228,14 @@ export const virtuaLoginClient = {
         }
 
         try {
+            console.debug(`[DEBUG][virtuaLoginClient] PUT ${url}`);
             const response = await fetch(url, { method: 'PUT', headers, body: formData });
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][virtuaLoginClient] PUT ${endpoint} → status=${response.status}`, responseData);
             if (!response.ok) throw new Error(responseData.message || 'Request failed');
             return responseData;
         } catch (error) {
-            console.error('VirtuaLogin API Error:', error);
+            console.error(`[DEBUG][virtuaLoginClient] PUT ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -237,16 +253,18 @@ export const virtuaLoginClient = {
         }
 
         try {
+            console.debug(`[DEBUG][virtuaLoginClient] DELETE ${url}`);
             const response = await fetch(url, {
                 method: 'DELETE',
                 headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: formBody.toString(),
             });
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][virtuaLoginClient] DELETE ${endpoint} → status=${response.status}`, responseData);
             if (!response.ok) throw new Error(responseData.message || 'Request failed');
             return responseData;
         } catch (error) {
-            console.error('VirtuaLogin API Error:', error);
+            console.error(`[DEBUG][virtuaLoginClient] DELETE ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -258,16 +276,18 @@ export const localClient = {
     async post(endpoint: string, data: Record<string, any>) {
         const url = `${LOCAL_BASE_URL}${endpoint}`;
         try {
+            console.debug(`[DEBUG][localClient] POST ${url}`, data);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data),
             });
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][localClient] POST ${endpoint} → status=${response.status}`, responseData);
             if (!response.ok) throw new Error(responseData.message || 'Request failed');
             return responseData;
         } catch (error) {
-            console.error('Local API Error:', error);
+            console.error(`[DEBUG][localClient] POST ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -279,15 +299,17 @@ export const localAuthClient = {
     async get(endpoint: string, token: string) {
         const url = `${LOCAL_BASE_URL}${endpoint}`;
         try {
+            console.debug(`[DEBUG][localAuthClient] GET ${url}`);
             const response = await fetch(url, {
                 method: 'GET',
                 headers: { 'Authorization': `Bearer ${token}` },
             });
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][localAuthClient] GET ${endpoint} → status=${response.status}`, responseData);
             if (!response.ok) throw new Error(responseData.message || 'Request failed');
             return responseData;
         } catch (error) {
-            console.error('Local Auth API Error:', error);
+            console.error(`[DEBUG][localAuthClient] GET ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -295,6 +317,7 @@ export const localAuthClient = {
     async post(endpoint: string, data: Record<string, any>, token: string) {
         const url = `${LOCAL_BASE_URL}${endpoint}`;
         try {
+            console.debug(`[DEBUG][localAuthClient] POST ${url}`, data);
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -304,10 +327,11 @@ export const localAuthClient = {
                 body: JSON.stringify(data),
             });
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][localAuthClient] POST ${endpoint} → status=${response.status}`, responseData);
             if (!response.ok) throw new Error(responseData.message || 'Request failed');
             return responseData;
         } catch (error) {
-            console.error('Local Auth API Error:', error);
+            console.error(`[DEBUG][localAuthClient] POST ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -315,6 +339,7 @@ export const localAuthClient = {
     async put(endpoint: string, data: Record<string, any>, token: string) {
         const url = `${LOCAL_BASE_URL}${endpoint}`;
         try {
+            console.debug(`[DEBUG][localAuthClient] PUT ${url}`, data);
             const response = await fetch(url, {
                 method: 'PUT',
                 headers: {
@@ -324,10 +349,11 @@ export const localAuthClient = {
                 body: JSON.stringify(data),
             });
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][localAuthClient] PUT ${endpoint} → status=${response.status}`, responseData);
             if (!response.ok) throw new Error(responseData.message || 'Request failed');
             return responseData;
         } catch (error) {
-            console.error('Local Auth API Error:', error);
+            console.error(`[DEBUG][localAuthClient] PUT ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -335,6 +361,7 @@ export const localAuthClient = {
     async patch(endpoint: string, data: Record<string, any>, token: string) {
         const url = `${LOCAL_BASE_URL}${endpoint}`;
         try {
+            console.debug(`[DEBUG][localAuthClient] PATCH ${url}`, data);
             const response = await fetch(url, {
                 method: 'PATCH',
                 headers: {
@@ -344,10 +371,11 @@ export const localAuthClient = {
                 body: JSON.stringify(data),
             });
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][localAuthClient] PATCH ${endpoint} → status=${response.status}`, responseData);
             if (!response.ok) throw new Error(responseData.message || 'Request failed');
             return responseData;
         } catch (error) {
-            console.error('Local Auth API Error:', error);
+            console.error(`[DEBUG][localAuthClient] PATCH ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -355,15 +383,17 @@ export const localAuthClient = {
     async delete(endpoint: string, token: string) {
         const url = `${LOCAL_BASE_URL}${endpoint}`;
         try {
+            console.debug(`[DEBUG][localAuthClient] DELETE ${url}`);
             const response = await fetch(url, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` },
             });
             const responseData = await response.json().catch(() => ({}));
+            console.debug(`[DEBUG][localAuthClient] DELETE ${endpoint} → status=${response.status}`, responseData);
             if (!response.ok) throw new Error(responseData.message || 'Request failed');
             return responseData;
         } catch (error) {
-            console.error('Local Auth API Error:', error);
+            console.error(`[DEBUG][localAuthClient] DELETE ${endpoint} FAILED:`, error);
             throw error;
         }
     },
@@ -436,7 +466,7 @@ export const externalProfileService = {
 
 export const settingsService = {
     // Called after external login to register/find the user on our local backend
-    createSession: (data: { externalUserId: string; email: string; username?: string }) =>
+    createSession: (data: { externalUserId: string; email: string }) =>
         localClient.post('/api/auth/session', data),
 
     // Local health data only (height, weight)
