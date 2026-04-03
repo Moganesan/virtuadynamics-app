@@ -6,6 +6,7 @@ import { AppColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { dronesService, vitalsService } from '@/services/api';
 import { getSocket } from '@/services/socket';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
@@ -25,6 +26,7 @@ interface Drone {
     location: string;
     battery: number;
     speed: number;
+    apiUrl?: string;
 }
 
 interface VitalData {
@@ -46,6 +48,7 @@ const STATUS_CONFIG: Record<DroneStatus, { label: string; color: string; bg: str
 
 export default function DashboardScreen() {
     const { user, localToken } = useAuth();
+    const router = useRouter();
     const [droneModalVisible, setDroneModalVisible] = useState(false);
     const [drones, setDrones] = useState<Drone[]>([]);
     const [vitals, setVitals] = useState<VitalData | null>(null);
@@ -295,7 +298,24 @@ export default function DashboardScreen() {
                                         AppColors.critical;
 
                             return (
-                                <View key={drone.id} style={styles.droneItem}>
+                                <TouchableOpacity
+                                    key={drone.id}
+                                    style={styles.droneItem}
+                                    activeOpacity={0.7}
+                                    onPress={() => {
+                                        setDroneModalVisible(false);
+                                        router.push({
+                                            pathname: '/drone-control',
+                                            params: {
+                                                id: drone.id,
+                                                name: drone.name,
+                                                battery: String(drone.battery),
+                                                status: drone.status,
+                                                apiUrl: drone.apiUrl ?? '',
+                                            },
+                                        });
+                                    }}
+                                >
                                     {/* Left: icon + info */}
                                     <View style={styles.droneItemLeft}>
                                         <View style={[styles.droneItemIcon, { backgroundColor: cfg.bg }]}>
@@ -332,7 +352,7 @@ export default function DashboardScreen() {
                                             </View>
                                         )}
                                     </View>
-                                </View>
+                                </TouchableOpacity>
                             );
                         })}
                     </ScrollView>

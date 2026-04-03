@@ -37,7 +37,7 @@ router.get("/:id", async (req, res) => {
 // POST /api/drones — add a new drone
 router.post("/", async (req, res) => {
   try {
-    const { name, status, location, battery, speed } = req.body;
+    const { name, status, location, battery, speed, apiUrl } = req.body;
 
     if (!name) return res.status(400).json({ success: false, message: "Drone name is required" });
     if (status && !VALID_STATUSES.includes(status)) {
@@ -50,6 +50,7 @@ router.post("/", async (req, res) => {
       location: location || "Unknown",
       battery: battery ?? 100,
       speed: speed ?? 0,
+      apiUrl: apiUrl || "",
     });
 
     const io = req.app.get("io");
@@ -65,7 +66,7 @@ router.post("/", async (req, res) => {
 // PUT /api/drones/:id — update drone
 router.put("/:id", async (req, res) => {
   try {
-    const { name, status, location, battery, speed } = req.body;
+    const { name, status, location, battery, speed, apiUrl } = req.body;
 
     if (status && !VALID_STATUSES.includes(status)) {
       return res.status(400).json({ success: false, message: `Status must be one of: ${VALID_STATUSES.join(", ")}` });
@@ -77,6 +78,7 @@ router.put("/:id", async (req, res) => {
     if (location !== undefined) updates.location = location;
     if (battery !== undefined) updates.battery = battery;
     if (speed !== undefined) updates.speed = speed;
+    if (apiUrl !== undefined) updates.apiUrl = apiUrl;
 
     const drone = await Drone.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true });
     if (!drone) return res.status(404).json({ success: false, message: "Drone not found" });

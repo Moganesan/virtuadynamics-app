@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 const BASE_URL = 'https://virtuagrid.com';
 const APP_ID = 'CRI4VNCFF4K6X2';
 
-const LOCAL_BASE_URL = 'http://172.20.10.3:3000';
+const LOCAL_BASE_URL = 'http://192.168.0.8:3000';
 
 // ─── VirtuaLogin Auth Types & Helpers ────────────────────────────────────────
 
@@ -531,6 +531,51 @@ export const dronesService = {
 
     updateStatus: (id: string, status: string, token: string) =>
         localAuthClient.patch(`/api/drones/${id}/status`, { status }, token),
+};
+
+// ─── Drone Direct API (per-drone backend server) ──────────────────────────────
+
+function droneUrl(baseUrl: string, path: string): string {
+    return `${baseUrl.replace(/\/$/, '')}${path}`;
+}
+
+async function dronePost(baseUrl: string, path: string, body?: Record<string, any>) {
+    const res = await fetch(droneUrl(baseUrl, path), {
+        method: 'POST',
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || `${path} failed`);
+    return data;
+}
+
+export const droneApiService = {
+    getStatus: async (baseUrl: string) => {
+        const res = await fetch(droneUrl(baseUrl, '/status'));
+        if (!res.ok) throw new Error('Status fetch failed');
+        return res.json() as Promise<Record<string, any>>;
+    },
+
+    arm: (baseUrl: string) => dronePost(baseUrl, '/arm'),
+    disarm: (baseUrl: string) => dronePost(baseUrl, '/disarm'),
+    takeoff: (baseUrl: string, altitude = 3) => dronePost(baseUrl, '/takeoff', { altitude }),
+    land: (baseUrl: string) => dronePost(baseUrl, '/land'),
+    rtl: (baseUrl: string) => dronePost(baseUrl, '/rtl'),
+    hold: (baseUrl: string) => dronePost(baseUrl, '/hold'),
+    emergency: (baseUrl: string) => dronePost(baseUrl, '/emergency'),
+
+    setSafety: (baseUrl: string, state: 'on' | 'off') =>
+        dronePost(baseUrl, '/safety', { state }),
+
+    move: (baseUrl: string, direction: string, distance: number, speed: number) =>
+        dronePost(baseUrl, '/move', { direction, distance, speed }),
+
+    yaw: (baseUrl: string, direction: 'left' | 'right', degrees: number, speed: number) =>
+        dronePost(baseUrl, '/yaw', { direction, degrees, speed }),
+
+    setMode: (baseUrl: string, mode: string) =>
+        dronePost(baseUrl, '/mode', { mode }),
 };
 
 // ─── Incidents Service (Local Backend) ───────────────────────────────────────

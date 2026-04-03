@@ -6,6 +6,7 @@ const droneSchema = new mongoose.Schema({
   location: { type: String, default: "Unknown" },
   battery: { type: Number, default: 100 },
   speed: { type: Number, default: 0 },
+  apiUrl: { type: String, default: "" },
   createdAt: { type: Date, default: Date.now },
 });
 
