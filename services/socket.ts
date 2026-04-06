@@ -1,6 +1,5 @@
 import SocketIO from 'socket.io-client';
-
-const LOCAL_BASE_URL = 'http://172.20.10.3:3000';
+import { LOCAL_BASE_URL } from './api';
 
 let socket: ReturnType<typeof SocketIO> | null = null;
 

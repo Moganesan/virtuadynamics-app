@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 const BASE_URL = 'https://virtuagrid.com';
 const APP_ID = 'CRI4VNCFF4K6X2';
 
-const LOCAL_BASE_URL = 'http://192.168.0.8:3000';
+export const LOCAL_BASE_URL = 'http://192.168.0.28:3000';
 
 // ─── VirtuaLogin Auth Types & Helpers ────────────────────────────────────────
 
@@ -539,10 +539,15 @@ function droneUrl(baseUrl: string, path: string): string {
     return `${baseUrl.replace(/\/$/, '')}${path}`;
 }
 
+// ngrok free-tier requires this header on non-browser requests to skip the interstitial page
+const NGROK_HEADERS = { 'ngrok-skip-browser-warning': '1' };
+
 async function dronePost(baseUrl: string, path: string, body?: Record<string, any>) {
     const res = await fetch(droneUrl(baseUrl, path), {
         method: 'POST',
-        headers: body ? { 'Content-Type': 'application/json' } : {},
+        headers: body
+            ? { 'Content-Type': 'application/json', ...NGROK_HEADERS }
+            : { ...NGROK_HEADERS },
         body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
@@ -550,32 +555,41 @@ async function dronePost(baseUrl: string, path: string, body?: Record<string, an
     return data;
 }
 
+// Direct access (only works when device can reach the drone server itself)
 export const droneApiService = {
     getStatus: async (baseUrl: string) => {
-        const res = await fetch(droneUrl(baseUrl, '/status'));
-        if (!res.ok) throw new Error('Status fetch failed');
+        const res = await fetch(droneUrl(baseUrl, '/status'), { headers: NGROK_HEADERS });
+        if (!res.ok) throw new Error(`Status fetch failed: ${res.status}`);
         return res.json() as Promise<Record<string, any>>;
     },
-
     arm: (baseUrl: string) => dronePost(baseUrl, '/arm'),
     disarm: (baseUrl: string) => dronePost(baseUrl, '/disarm'),
     takeoff: (baseUrl: string, altitude = 3) => dronePost(baseUrl, '/takeoff', { altitude }),
     land: (baseUrl: string) => dronePost(baseUrl, '/land'),
-    rtl: (baseUrl: string) => dronePost(baseUrl, '/rtl'),
-    hold: (baseUrl: string) => dronePost(baseUrl, '/hold'),
     emergency: (baseUrl: string) => dronePost(baseUrl, '/emergency'),
+};
 
-    setSafety: (baseUrl: string, state: 'on' | 'off') =>
-        dronePost(baseUrl, '/safety', { state }),
+// ─── Drone Proxy Service (routes through local backend — always reachable) ────
+// Use this instead of droneApiService when the device can't reach the drone URL directly.
 
-    move: (baseUrl: string, direction: string, distance: number, speed: number) =>
-        dronePost(baseUrl, '/move', { direction, distance, speed }),
+export const droneProxyService = {
+    getStatus: (droneId: string, token: string) =>
+        localAuthClient.get(`/api/drones/${droneId}/proxy/status`, token),
 
-    yaw: (baseUrl: string, direction: 'left' | 'right', degrees: number, speed: number) =>
-        dronePost(baseUrl, '/yaw', { direction, degrees, speed }),
+    arm: (droneId: string, token: string) =>
+        localAuthClient.post(`/api/drones/${droneId}/proxy/arm`, {}, token),
 
-    setMode: (baseUrl: string, mode: string) =>
-        dronePost(baseUrl, '/mode', { mode }),
+    disarm: (droneId: string, token: string) =>
+        localAuthClient.post(`/api/drones/${droneId}/proxy/disarm`, {}, token),
+
+    takeoff: (droneId: string, altitude: number, token: string) =>
+        localAuthClient.post(`/api/drones/${droneId}/proxy/takeoff`, { altitude }, token),
+
+    land: (droneId: string, token: string) =>
+        localAuthClient.post(`/api/drones/${droneId}/proxy/land`, {}, token),
+
+    emergency: (droneId: string, token: string) =>
+        localAuthClient.post(`/api/drones/${droneId}/proxy/emergency`, {}, token),
 };
 
 // ─── Incidents Service (Local Backend) ───────────────────────────────────────

@@ -46,6 +46,7 @@ function AuthGate() {
             <Stack.Screen name="device-detail" options={{ title: 'Device Details' }} />
             <Stack.Screen name="incident-history" options={{ title: 'Incident History' }} />
             <Stack.Screen name="incident-detail" options={{ title: 'Incident Details' }} />
+            <Stack.Screen name="drone-control" options={{ headerShown: false }} />
         </Stack>
     );
 }

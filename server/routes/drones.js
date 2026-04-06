@@ -114,6 +114,38 @@ router.patch("/:id/status", async (req, res) => {
   }
 });
 
+// ── Drone Direct-API Proxy ────────────────────────────────────────────────────
+// Forwards GET /api/drones/:id/proxy/status  →  {drone.apiUrl}/status
+// Forwards POST /api/drones/:id/proxy/arm    →  {drone.apiUrl}/arm  … etc.
+// The backend (server-side) can reach the ngrok URL even when the mobile device cannot.
+
+router.all("/:id/proxy/:cmd", async (req, res) => {
+  try {
+    const drone = await Drone.findById(req.params.id);
+    if (!drone) return res.status(404).json({ success: false, message: "Drone not found" });
+    if (!drone.apiUrl) return res.status(400).json({ success: false, message: "Drone has no API URL configured" });
+
+    const target = `${drone.apiUrl.replace(/\/$/, "")}/${req.params.cmd}`;
+    const isWrite = req.method !== "GET";
+
+    const upstream = await fetch(target, {
+      method: req.method,
+      headers: {
+        "ngrok-skip-browser-warning": "1",
+        "User-Agent": "VirtuaDynamics-Backend/1.0",
+        ...(isWrite && req.body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: isWrite && req.body ? JSON.stringify(req.body) : undefined,
+    });
+
+    const data = await upstream.json().catch(() => ({}));
+    return res.status(upstream.status).json(data);
+  } catch (err) {
+    console.error("Drone proxy error:", err.message);
+    res.status(502).json({ success: false, message: "Drone server unreachable", error: err.message });
+  }
+});
+
 // DELETE /api/drones/:id
 router.delete("/:id", async (req, res) => {
   try {
