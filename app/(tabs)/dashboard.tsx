@@ -1,10 +1,11 @@
-import { SmartRingCard } from '@/components/ui/SmartRingCard';
+import { WearOSCard } from '@/components/ui/WearOSCard';
+import { useWearOS } from '@/services/wearOS';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { VitalCard } from '@/components/ui/VitalCard';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AppColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
-import { dronesService, vitalsService } from '@/services/api';
+import { dronesService } from '@/services/api';
 import { getSocket } from '@/services/socket';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
@@ -29,14 +30,6 @@ interface Drone {
     apiUrl?: string;
 }
 
-interface VitalData {
-    heartRate: number;
-    bloodOxygen: number;
-    temperature: number;
-    bloodPressure: string;
-    trend: string;
-}
-
 type DroneStatus = 'standby' | 'active' | 'charging' | 'offline';
 
 const STATUS_CONFIG: Record<DroneStatus, { label: string; color: string; bg: string }> = {
@@ -51,8 +44,10 @@ export default function DashboardScreen() {
     const router = useRouter();
     const [droneModalVisible, setDroneModalVisible] = useState(false);
     const [drones, setDrones] = useState<Drone[]>([]);
-    const [vitals, setVitals] = useState<VitalData | null>(null);
     const [loading, setLoading] = useState(true);
+
+    // All vitals come exclusively from the Wear OS watch in real-time
+    const { vitals: wearVitals } = useWearOS();
 
     const primaryProfile = user?.user_profiles?.[0];
     const firstName = primaryProfile?.first_name || user?.first_name || '';
@@ -61,20 +56,16 @@ export default function DashboardScreen() {
         : (user?.username || 'User');
 
     const fetchData = useCallback(async () => {
-        if (!localToken) return;
+        if (!localToken) {
+            setLoading(false);
+            return;
+        }
         console.debug('[DEBUG][Dashboard] Fetching drones and vitals...');
         try {
-            const [dronesRes, vitalsRes] = await Promise.all([
-                dronesService.getAll(localToken),
-                vitalsService.getLatest(localToken).catch(() => null),
-            ]);
+            const dronesRes = await dronesService.getAll(localToken);
             console.debug('[DEBUG][Dashboard] Drones response:', JSON.stringify(dronesRes));
-            console.debug('[DEBUG][Dashboard] Vitals response:', JSON.stringify(vitalsRes));
             if (dronesRes.success && dronesRes.data) {
                 setDrones(dronesRes.data);
-            }
-            if (vitalsRes?.success && vitalsRes.data) {
-                setVitals(vitalsRes.data);
             }
         } catch (err) {
             console.error('[DEBUG][Dashboard] Fetch error:', err);
@@ -91,11 +82,6 @@ export default function DashboardScreen() {
     useEffect(() => {
         const socket = getSocket();
 
-        const handleVitalsUpdate = (vital: VitalData) => {
-            console.debug('[DEBUG][Dashboard] Socket vitals update:', JSON.stringify(vital));
-            setVitals(vital);
-        };
-
         const handleDroneUpdate = (drone: Drone) => {
             console.debug('[DEBUG][Dashboard] Socket drone update:', JSON.stringify(drone));
             setDrones((prev) => prev.map((d) => (d.id === drone.id ? drone : d)));
@@ -111,16 +97,12 @@ export default function DashboardScreen() {
             setDrones((prev) => prev.filter((d) => d.id !== id));
         };
 
-        socket.on('vitals:new', handleVitalsUpdate);
-        socket.on('vitals:updated', handleVitalsUpdate);
         socket.on('drones:updated', handleDroneUpdate);
         socket.on('drones:statusChanged', handleDroneUpdate);
         socket.on('drones:new', handleDroneNew);
         socket.on('drones:deleted', handleDroneDeleted);
 
         return () => {
-            socket.off('vitals:new', handleVitalsUpdate);
-            socket.off('vitals:updated', handleVitalsUpdate);
             socket.off('drones:updated', handleDroneUpdate);
             socket.off('drones:statusChanged', handleDroneUpdate);
             socket.off('drones:new', handleDroneNew);
@@ -168,17 +150,21 @@ export default function DashboardScreen() {
                             <View style={styles.gridRow}>
                                 <VitalCard
                                     title="Heart Rate"
-                                    value={vitals?.heartRate ?? '--'}
+                                    value={wearVitals?.heartRate ?? '--'}
                                     unit="BPM"
-                                    status={vitals ? getVitalStatus('heartRate', vitals.heartRate) : 'normal'}
-                                    trend={(vitals?.trend as any) || 'flat'}
+                                    status={wearVitals?.heartRate && wearVitals.heartRate !== '--'
+                                        ? getVitalStatus('heartRate', Number(wearVitals.heartRate))
+                                        : 'normal'}
+                                    trend="flat"
                                     iconName="heart.fill"
                                 />
                                 <VitalCard
                                     title="Blood Oxygen"
-                                    value={vitals?.bloodOxygen ?? '--'}
+                                    value={wearVitals?.spo2 ?? '--'}
                                     unit="%"
-                                    status={vitals ? getVitalStatus('bloodOxygen', vitals.bloodOxygen) : 'normal'}
+                                    status={wearVitals?.spo2 && wearVitals.spo2 !== '--'
+                                        ? getVitalStatus('bloodOxygen', Number(wearVitals.spo2))
+                                        : 'normal'}
                                     trend="flat"
                                     iconName="lungs.fill"
                                 />
@@ -186,18 +172,22 @@ export default function DashboardScreen() {
                             <View style={styles.gridRow}>
                                 <VitalCard
                                     title="Temperature"
-                                    value={vitals?.temperature ?? '--'}
+                                    value={wearVitals?.temperature ?? '--'}
                                     unit="°C"
-                                    status={vitals ? getVitalStatus('temperature', vitals.temperature) : 'normal'}
+                                    status={wearVitals?.temperature
+                                        ? getVitalStatus('temperature', Number(wearVitals.temperature))
+                                        : 'normal'}
                                     trend="flat"
                                     iconName="thermometer"
                                 />
                                 <VitalCard
                                     title="Blood Pressure"
-                                    value={vitals?.bloodPressure ?? '--'}
+                                    value={wearVitals?.bloodPressure ?? '--'}
                                     unit="mmHg"
-                                    status={vitals ? getBpStatus(vitals.bloodPressure) : 'normal'}
-                                    trend="flat"
+                                    status={wearVitals?.bloodPressure
+                                        ? getBpStatus(wearVitals.bloodPressure)
+                                        : 'normal'}
+                                    trend={(wearVitals?.trend as any) ?? 'flat'}
                                     iconName="drop.fill"
                                 />
                             </View>
@@ -205,10 +195,10 @@ export default function DashboardScreen() {
                     )}
                 </View>
 
-                {/* Smart Ring Section */}
+                {/* Wear OS Section */}
                 <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Smart Ring</Text>
-                    <SmartRingCard />
+                    <Text style={styles.sectionTitle}>Wear OS Watch</Text>
+                    <WearOSCard />
                 </View>
 
                 {/* Drone Status Card */}

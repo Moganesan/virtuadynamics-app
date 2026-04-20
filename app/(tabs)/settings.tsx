@@ -1,7 +1,10 @@
+import { BluetoothScanModal } from '@/components/ui/BluetoothScanModal';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { AppColors } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { externalProfileService, getVirtuaLoginAuth, settingsService } from '@/services/api';
+import { BLEDevice, useBluetooth } from '@/services/bluetooth';
+import { useWearOS } from '@/services/wearOS';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as Contacts from 'expo-contacts';
@@ -139,8 +142,26 @@ export default function SettingsScreen() {
     const [notifDrone, setNotifDrone]             = useState(false);
     const [notifWeeklyReport, setNotifWeeklyReport] = useState(true);
 
-    // Smart ring / connected device
-    const [device, setDevice] = useState({ name: 'VD SmartRing Pro', battery: 78, connected: false });
+    // Wear OS watch — live connection via Wearable Data Layer
+    const { connected: watchConnected, device: wearDevice } = useWearOS();
+    // device state used only for battery fallback from DB
+    const [device, setDevice] = useState({ name: 'Wear OS Watch', battery: 0 });
+
+    // BLE scan for pairing a watch
+    const {
+        pairedWatch, pairDevice, unpairDevice,
+        bluetoothOn, scanning, devices: bleDevices,
+        permissionsGranted, locationEnabled,
+        connectingId, connectError,
+        requestPermissions, openLocationSettings,
+        startScan, stopScan, connectDevice,
+    } = useBluetooth();
+    const [scanModalVisible, setScanModalVisible] = useState(false);
+
+    const handleWatchSelected = async (ble: BLEDevice) => {
+        await pairDevice(ble);
+        setDevice((prev) => ({ ...prev, name: ble.name }));
+    };
 
     // ── Sync external profile data when user changes ────────────────────────
     useEffect(() => {
@@ -206,9 +227,9 @@ export default function SettingsScreen() {
         settingsService.getDevices(localToken)
             .then((res) => {
                 console.debug('[DEBUG][Settings] Devices response:', JSON.stringify(res));
-                const connected = res.data?.find((d: any) => d.status === 'connected');
-                if (connected) {
-                    setDevice({ name: connected.name, battery: connected.battery, connected: true });
+                const paired = res.data?.find((d: any) => d.status === 'connected');
+                if (paired) {
+                    setDevice({ name: paired.name, battery: paired.battery });
                 }
             })
             .catch((err) => { console.error('[DEBUG][Settings] Devices fetch error:', err); });
@@ -557,27 +578,29 @@ export default function SettingsScreen() {
                     />
                 </View>
 
-                {/* ── Connected Smart Ring ──────────────────────────────── */}
-                <SectionHeader title="Connected Device" icon="bluetooth" />
+                {/* ── Wear OS Watch ─────────────────────────────────────── */}
+                <SectionHeader title="Wear OS Watch" icon="applewatch" />
                 <View style={styles.card}>
                     <View style={styles.ringRow}>
                         <View style={styles.ringIconWrap}>
                             <View style={styles.ringIconOuter}>
                                 <View style={styles.ringIconInner}>
-                                    <IconSymbol name="bluetooth" size={14} color={device.connected ? AppColors.primary : AppColors.disconnected} />
+                                    <IconSymbol name="applewatch" size={14} color={watchConnected ? AppColors.primary : AppColors.disconnected} />
                                 </View>
                             </View>
                         </View>
                         <View style={styles.ringInfo}>
-                            <Text style={styles.ringName}>{device.name}</Text>
+                            <Text style={styles.ringName}>
+                                {wearDevice?.displayName ?? pairedWatch?.name ?? device.name}
+                            </Text>
                             <View style={styles.ringStatusRow}>
-                                <View style={[styles.ringDot, { backgroundColor: device.connected ? AppColors.success : AppColors.disconnected }]} />
-                                <Text style={[styles.ringStatus, { color: device.connected ? AppColors.success : AppColors.disconnected }]}>
-                                    {device.connected ? 'Connected' : 'Disconnected'}
+                                <View style={[styles.ringDot, { backgroundColor: watchConnected ? AppColors.success : AppColors.disconnected }]} />
+                                <Text style={[styles.ringStatus, { color: watchConnected ? AppColors.success : AppColors.disconnected }]}>
+                                    {watchConnected ? 'Connected' : pairedWatch ? 'Paired — awaiting data' : 'No watch paired'}
                                 </Text>
                             </View>
                         </View>
-                        {device.connected && (
+                        {watchConnected && device.battery > 0 && (
                             <View style={styles.ringBatteryBlock}>
                                 <View style={styles.ringBatteryTrack}>
                                     <View style={[styles.ringBatteryFill, { width: `${device.battery}%` as any, backgroundColor: batteryColor }]} />
@@ -586,7 +609,56 @@ export default function SettingsScreen() {
                             </View>
                         )}
                     </View>
+
+                    {/* Scan / Unpair buttons */}
+                    <View style={styles.watchActions}>
+                        <TouchableOpacity
+                            style={styles.watchScanBtn}
+                            onPress={() => setScanModalVisible(true)}
+                            activeOpacity={0.75}
+                        >
+                            <IconSymbol name="bluetooth" size={15} color={AppColors.primary} />
+                            <Text style={styles.watchScanLabel}>
+                                {pairedWatch ? 'Change Watch' : 'Scan for Watch'}
+                            </Text>
+                        </TouchableOpacity>
+
+                        {pairedWatch && !watchConnected && (
+                            <TouchableOpacity
+                                style={styles.watchUnpairBtn}
+                                onPress={unpairDevice}
+                                activeOpacity={0.75}
+                            >
+                                <Text style={styles.watchUnpairLabel}>Unpair</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+
+                    {!bluetoothOn && (
+                        <Text style={styles.watchBtHint}>
+                            Enable Bluetooth to scan for nearby watches
+                        </Text>
+                    )}
                 </View>
+
+                {/* BLE scan modal */}
+                <BluetoothScanModal
+                    visible={scanModalVisible}
+                    onClose={() => setScanModalVisible(false)}
+                    onDeviceSelected={handleWatchSelected}
+                    bluetoothOn={bluetoothOn}
+                    scanning={scanning}
+                    devices={bleDevices}
+                    permissionsGranted={permissionsGranted}
+                    locationEnabled={locationEnabled}
+                    connectingId={connectingId}
+                    connectError={connectError}
+                    requestPermissions={requestPermissions}
+                    openLocationSettings={openLocationSettings}
+                    startScan={startScan}
+                    stopScan={stopScan}
+                    connectDevice={connectDevice}
+                />
 
                 {/* ── Logout ────────────────────────────────────────────── */}
                 <TouchableOpacity
@@ -1287,5 +1359,47 @@ const styles = StyleSheet.create({
     roleOptionText: {
         fontSize: 14,
         fontWeight: '700',
+    },
+    watchActions: {
+        flexDirection: 'row',
+        gap: 10,
+        marginTop: 14,
+        paddingTop: 14,
+        borderTopWidth: 1,
+        borderTopColor: AppColors.border,
+    },
+    watchScanBtn: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingVertical: 10,
+        borderRadius: 12,
+        backgroundColor: `${AppColors.primary}15`,
+    },
+    watchScanLabel: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: AppColors.primary,
+    },
+    watchUnpairBtn: {
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 12,
+        backgroundColor: `${AppColors.critical}12`,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    watchUnpairLabel: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: AppColors.critical,
+    },
+    watchBtHint: {
+        fontSize: 11,
+        color: AppColors.disconnected,
+        textAlign: 'center',
+        marginTop: 10,
     },
 });

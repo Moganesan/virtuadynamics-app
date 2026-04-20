@@ -6,6 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import SocketIO from 'socket.io-client';
 import {
+    ScrollView,
     StyleSheet,
     Switch,
     Text,
@@ -194,12 +195,13 @@ export default function DroneControlScreen() {
     const [connected,  setConnected]  = useState(false);
     const [toggling,   setToggling]   = useState(false);
     const [launching,  setLaunching]  = useState(false);
-    const [landing,    setLanding]    = useState(false);
-    const [bladeAngle, setBladeAngle] = useState(0);
+    const [landing,     setLanding]     = useState(false);
+    const [settingMode, setSettingMode] = useState(false);
+    const [bladeAngle,  setBladeAngle]  = useState(0);
+
+    const FLIGHT_MODES = ['STABILIZE', 'ALTHOLD', 'LOITER', 'GUIDED', 'LAND', 'RTL'] as const;
 
     const { width, height } = useWindowDimensions();
-    const CANVAS_W = width;
-    const CANVAS_H = height;
     const cx = width / 2;
     const cy = height * 0.38;
 
@@ -312,6 +314,16 @@ export default function DroneControlScreen() {
         try { await droneProxyService.land(droneId, localToken); }
         catch (e) { console.error('[DroneControl] land error:', e); }
         finally { setLanding(false); }
+    };
+
+    const handleSetMode = async (newMode: string) => {
+        if (!droneId || !localToken || !connected || newMode === mode) return;
+        setSettingMode(true);
+        try {
+            await droneProxyService.setMode(droneId, newMode, localToken);
+            setMode(newMode);
+        } catch (e) { console.error('[DroneControl] setMode error:', e); }
+        finally { setSettingMode(false); }
     };
 
     // ── Colors ───────────────────────────────────────────────────────────────
@@ -470,6 +482,31 @@ export default function DroneControlScreen() {
                     <View style={styles.batteryBar}>
                         <View style={[styles.batteryFill, { width: `${battery}%` as any, backgroundColor: batteryColor }]} />
                     </View>
+
+                    {/* ── Flight Mode Selector ── */}
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.modeScroll}
+                    >
+                        {FLIGHT_MODES.map(m => {
+                            const isActive = mode.toUpperCase() === m;
+                            return (
+                                <TouchableOpacity
+                                    key={m}
+                                    style={[styles.modeChip, isActive && styles.modeChipActive]}
+                                    onPress={() => handleSetMode(m)}
+                                    disabled={!connected || settingMode}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={[styles.modeChipText, isActive && styles.modeChipTextActive]}>
+                                        {m}
+                                    </Text>
+                                    {isActive && <View style={styles.modeActiveDot} />}
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
 
                     {/* Arm row */}
                     <View style={styles.armRow}>
@@ -797,5 +834,41 @@ const styles = StyleSheet.create({
         fontWeight: '800',
         color: C.white,
         letterSpacing: 1.5,
+    },
+
+    // ── Mode selector ──
+    modeScroll: {
+        gap: 8,
+        paddingVertical: 2,
+    },
+    modeChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        paddingHorizontal: 14,
+        paddingVertical: 7,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(0,229,255,0.18)',
+        backgroundColor: 'rgba(0,229,255,0.04)',
+    },
+    modeChipActive: {
+        borderColor: C.armed,
+        backgroundColor: 'rgba(0,229,255,0.15)',
+    },
+    modeChipText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: C.textDim,
+        letterSpacing: 1.2,
+    },
+    modeChipTextActive: {
+        color: C.armed,
+    },
+    modeActiveDot: {
+        width: 5,
+        height: 5,
+        borderRadius: 3,
+        backgroundColor: C.armed,
     },
 });

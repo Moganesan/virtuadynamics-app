@@ -1,8 +1,55 @@
 const express = require("express");
 const Vital = require("../models/Vital");
+const User = require("../models/User");
 const { authenticate } = require("../middleware/auth");
 
 const router = express.Router();
+
+// POST /api/vitals/watch-ingest — unauthenticated endpoint for the Wear OS watch.
+// The watch identifies itself with x-watch-api-key header (pre-shared secret stored
+// in both the watch app and WATCH_API_KEY env var).  Broadcasts vitals:new to all
+// currently-connected socket clients so the phone receives real-time data without
+// needing Wearable Data Layer OS pairing.
+router.post("/watch-ingest", async (req, res) => {
+  const key = req.headers["x-watch-api-key"];
+  if (!key || key !== process.env.WATCH_API_KEY) {
+    return res.status(401).json({ success: false, message: "Invalid watch API key" });
+  }
+
+  try {
+    const { heartRate, bloodOxygen, temperature, bloodPressure, trend } = req.body;
+
+    if (heartRate === undefined || bloodOxygen === undefined) {
+      return res.status(400).json({ success: false, message: "heartRate and bloodOxygen are required" });
+    }
+
+    // Find the first user to associate the vitals with.
+    // In a multi-user deployment, include a userId or externalUserId in the request body.
+    const user = await User.findOne().sort({ createdAt: 1 });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "No user found to associate vitals with" });
+    }
+
+    const vital = await Vital.create({
+      userId: user.id,
+      heartRate,
+      bloodOxygen,
+      temperature: temperature ?? null,
+      bloodPressure: bloodPressure ?? null,
+      trend: trend || "flat",
+    });
+
+    const io = req.app.get("io");
+    // Broadcast to the user's room AND the global channel so any connected phone receives it
+    io.to(`user:${user.id}`).emit("vitals:new", vital.toJSON());
+    io.emit("watch:vitals", vital.toJSON()); // extra event for debugging
+
+    res.status(201).json({ success: true, data: vital });
+  } catch (err) {
+    console.error("Watch ingest error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
 
 router.use(authenticate);
 

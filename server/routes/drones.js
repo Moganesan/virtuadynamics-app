@@ -138,7 +138,20 @@ router.all("/:id/proxy/:cmd", async (req, res) => {
       body: isWrite && req.body ? JSON.stringify(req.body) : undefined,
     });
 
-    const data = await upstream.json().catch(() => ({}));
+    // Try to parse as JSON; if the upstream returns HTML (e.g. ngrok "tunnel not found"
+    // page) fall back to a descriptive error instead of a silent {}.
+    const text = await upstream.text().catch(() => "");
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // Non-JSON response — likely ngrok tunnel down or Flask not running
+      console.warn(`Drone proxy: upstream ${target} returned non-JSON (status ${upstream.status}):`, text.slice(0, 200));
+      return res.status(502).json({
+        success: false,
+        message: `Drone server at ${drone.apiUrl} returned non-JSON response (status ${upstream.status}). Check that the ngrok tunnel and Flask server are running.`,
+      });
+    }
     return res.status(upstream.status).json(data);
   } catch (err) {
     console.error("Drone proxy error:", err.message);

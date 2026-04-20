@@ -5,7 +5,7 @@ import { Platform } from 'react-native';
 const BASE_URL = 'https://virtuagrid.com';
 const APP_ID = 'CRI4VNCFF4K6X2';
 
-export const LOCAL_BASE_URL = 'http://192.168.0.28:3000';
+export const LOCAL_BASE_URL = 'http://192.168.0.39:3000/';
 
 // ─── VirtuaLogin Auth Types & Helpers ────────────────────────────────────────
 
@@ -274,7 +274,7 @@ export const virtuaLoginClient = {
 
 export const localClient = {
     async post(endpoint: string, data: Record<string, any>) {
-        const url = `${LOCAL_BASE_URL}${endpoint}`;
+        const url = `${LOCAL_BASE_URL.replace(/\/$/, '')}${endpoint}`;
         try {
             console.debug(`[DEBUG][localClient] POST ${url}`, data);
             const response = await fetch(url, {
@@ -297,7 +297,7 @@ export const localClient = {
 
 export const localAuthClient = {
     async get(endpoint: string, token: string) {
-        const url = `${LOCAL_BASE_URL}${endpoint}`;
+        const url = `${LOCAL_BASE_URL.replace(/\/$/, '')}${endpoint}`;
         try {
             console.debug(`[DEBUG][localAuthClient] GET ${url}`);
             const response = await fetch(url, {
@@ -315,7 +315,7 @@ export const localAuthClient = {
     },
 
     async post(endpoint: string, data: Record<string, any>, token: string) {
-        const url = `${LOCAL_BASE_URL}${endpoint}`;
+        const url = `${LOCAL_BASE_URL.replace(/\/$/, '')}${endpoint}`;
         try {
             console.debug(`[DEBUG][localAuthClient] POST ${url}`, data);
             const response = await fetch(url, {
@@ -337,7 +337,7 @@ export const localAuthClient = {
     },
 
     async put(endpoint: string, data: Record<string, any>, token: string) {
-        const url = `${LOCAL_BASE_URL}${endpoint}`;
+        const url = `${LOCAL_BASE_URL.replace(/\/$/, '')}${endpoint}`;
         try {
             console.debug(`[DEBUG][localAuthClient] PUT ${url}`, data);
             const response = await fetch(url, {
@@ -359,7 +359,7 @@ export const localAuthClient = {
     },
 
     async patch(endpoint: string, data: Record<string, any>, token: string) {
-        const url = `${LOCAL_BASE_URL}${endpoint}`;
+        const url = `${LOCAL_BASE_URL.replace(/\/$/, '')}${endpoint}`;
         try {
             console.debug(`[DEBUG][localAuthClient] PATCH ${url}`, data);
             const response = await fetch(url, {
@@ -381,7 +381,7 @@ export const localAuthClient = {
     },
 
     async delete(endpoint: string, token: string) {
-        const url = `${LOCAL_BASE_URL}${endpoint}`;
+        const url = `${LOCAL_BASE_URL.replace(/\/$/, '')}${endpoint}`;
         try {
             console.debug(`[DEBUG][localAuthClient] DELETE ${url}`);
             const response = await fetch(url, {
@@ -590,6 +590,9 @@ export const droneProxyService = {
 
     emergency: (droneId: string, token: string) =>
         localAuthClient.post(`/api/drones/${droneId}/proxy/emergency`, {}, token),
+
+    setMode: (droneId: string, mode: string, token: string) =>
+        localAuthClient.post(`/api/drones/${droneId}/proxy/mode`, { mode }, token),
 };
 
 // ─── Incidents Service (Local Backend) ───────────────────────────────────────
